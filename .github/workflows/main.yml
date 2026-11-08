@@ -1,0 +1,43 @@
+name: Beta Pre-Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          mkdir -p output/
+          echo "Build do Vitality gerado com sucesso" > output/build-info.txt
+          zip -r vitality-beta.zip output/
+
+      - name: Tag
+        id: tagger
+        run: echo "tag=beta-v1.0.${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tagger.outputs.tag }}
+          name: "Vitality Beta ${{ steps.tagger.outputs.tag }}"
+          body: |
+            🚀 **Versão Beta Automática**
+            
+            - Commit base: ${{ github.sha }}
+            - Workflow Run: #${{ github.run_number }}
+          prerelease: true
+          draft: false
+          files: |
+            vitality-beta.zip
