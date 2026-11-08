@@ -1,56 +1,32 @@
-name: Beta Pre-Release
+name: Build Android APK
 
 on:
   push:
-    branches:
-      - main
-  workflow_dispatch:
-
-permissions:
-  contents: write
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
 
 jobs:
-  build-and-release:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
           java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew || true
 
-      - name: Make gradlew executable
-        run: chmod +x ./gradlew
+      - name: Build Debug APK with Gradle
+        run: ./gradlew assembleDebug --stacktrace
 
-      - name: Build APK
-        run: ./gradlew assembleDebug
-
-      - name: Find and Rename APK
-        run: |
-          APK_PATH=$(find . -name "*.apk" | grep debug | head -n 1)
-          mv "$APK_PATH" vitality-beta.apk
-
-      - name: Tag
-        id: tagger
-        run: echo "tag=beta-v1.0.${{ github.run_number }}" >> $GITHUB_OUTPUT
-
-      - name: Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ steps.tagger.outputs.tag }}
-          name: "Vitality Beta ${{ steps.tagger.outputs.tag }}"
-          body: |
-            🚀 **Versão Beta Automática**
-            
-            - Commit base: ${{ github.sha }}
-            - Workflow Run: #${{ github.run_number }}
-          prerelease: true
-          draft: false
-          files: vitality-beta.apk
+          name: vital-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
