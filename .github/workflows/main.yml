@@ -17,11 +17,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build APK
+        run: ./gradlew assembleDebug
+
+      - name: Find and Rename APK
         run: |
-          mkdir -p output/
-          echo "Build do Vitality gerado com sucesso" > output/build-info.txt
-          zip -r vitality-beta.zip output/
+          APK_PATH=$(find . -name "*.apk" | grep debug | head -n 1)
+          mv "$APK_PATH" vitality-beta.apk
 
       - name: Tag
         id: tagger
@@ -39,5 +53,4 @@ jobs:
             - Workflow Run: #${{ github.run_number }}
           prerelease: true
           draft: false
-          files: |
-            vitality-beta.zip
+          files: vitality-beta.apk
