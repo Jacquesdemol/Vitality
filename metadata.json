@@ -1,0 +1,8 @@
+{
+  "name": "VITAL - Saúde & Bem-estar",
+  "description": "Painel centralizado de saúde e bem-estar Android inspirado no Samsung Health e Galaxy Store, integrando Android Health Connect, Zepp OS e Jetpack Compose.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
