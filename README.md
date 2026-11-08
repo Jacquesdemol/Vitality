@@ -1,8 +1,10 @@
 # VITAL — Aplicativo de Saúde e Bem-estar para Android
 
+**Repositório Oficial no GitHub**: [https://github.com/Jacquesdemol/Vitality](https://github.com/Jacquesdemol/Vitality)
+
 **VITAL** é um aplicativo Android nativo desenvolvido em **Kotlin** e **Jetpack Compose** com arquitetura **MVVM**, projetado para monitoramento de saúde, atividade física e bem-estar inspirado na elegância do ecossistema Samsung Health e navegação em ilha flutuante da Galaxy Store.
 
-Possui identidade visual monocromática e minimalista (#090909, #171719, #242428, #85858C, #F2F2F4), integração centralizada com o **Android Health Connect SDK**, armazenamento local com **Room**, sincronizações periódicas com **WorkManager** e conector para **Zepp Open Platform** (dispositivos Amazfit).
+Possui identidade visual monocromática e minimalista (#090909, #171719, #242428, #85858C, #F2F2F4), integração centralizada com o **Android Health Connect SDK**, sistema de **Notificações Inteligentes e Incentivos** com **WorkManager**, tutorial interativo de onboarding, armazenamento local com **Room** e conector para **Zepp Open Platform** (dispositivos Amazfit).
 
 ---
 

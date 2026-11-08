@@ -45,6 +45,25 @@ export const AboutModal: React.FC<AboutModalProps> = ({
             </p>
           </div>
 
+          <div className="p-4 rounded-2xl bg-[#121214] border border-white/5 flex flex-col gap-2">
+            <span className="text-xs font-bold text-white block">Repositório Oficial no GitHub</span>
+            <p className="text-[11px] text-[#85858C]">
+              Acompanhe o código-fonte nativo, commits, issues e releases do VITAL:
+            </p>
+            <a
+              href="https://github.com/Jacquesdemol/Vitality"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 flex items-center justify-between p-3 rounded-xl bg-white text-black font-semibold text-xs hover:bg-neutral-200 transition-colors shadow-sm"
+            >
+              <div className="flex items-center gap-2">
+                <Code2 className="w-4 h-4 text-black" />
+                <span>github.com/Jacquesdemol/Vitality</span>
+              </div>
+              <span className="text-[10px] uppercase font-bold tracking-wider">Abrir ↗</span>
+            </a>
+          </div>
+
           <div className="p-3.5 rounded-2xl bg-[#242428]/40 border border-white/5">
             <span className="text-xs font-bold text-white block mb-2">Arquitetura Técnica Nativa</span>
             <ul className="space-y-1.5 text-[11px]">
@@ -70,16 +89,24 @@ export const AboutModal: React.FC<AboutModalProps> = ({
               </li>
               <li className="flex items-center gap-2 text-[#F2F2F4]">
                 <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                <strong>Background:</strong> WorkManager para sincronizações periódicas
+                <strong>Notificações:</strong> WorkManager + Notificações Inteligentes
               </li>
             </ul>
           </div>
         </div>
 
-        <div className="pt-3 border-t border-white/5 flex justify-end">
+        <div className="pt-3 border-t border-white/5 flex items-center justify-between">
+          <a
+            href="https://github.com/Jacquesdemol/Vitality"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-[#85858C] hover:text-white underline underline-offset-2 transition-colors"
+          >
+            Ver no GitHub
+          </a>
           <button
             onClick={onClose}
-            className="px-5 py-2 rounded-full bg-white text-black text-xs font-semibold hover:bg-neutral-200"
+            className="px-5 py-2 rounded-full bg-[#242428] text-white text-xs font-semibold hover:bg-[#323238] transition-colors"
           >
             Fechar
           </button>

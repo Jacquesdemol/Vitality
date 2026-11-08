@@ -161,7 +161,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           <ChevronRight className="w-4 h-4 text-[#85858C] group-hover:text-white transition-colors" />
         </button>
 
-        {/* Sobre o app */}
+        {/* Sobre o app & GitHub */}
         <button
           onClick={onOpenAbout}
           className="w-full p-3 rounded-2xl flex items-center justify-between text-left hover:bg-[#242428]/50 transition-colors group"
@@ -171,8 +171,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               <Info className="w-4 h-4 text-white/90" />
             </div>
             <div>
-              <span className="text-sm font-semibold text-[#F2F2F4] block">Sobre o app</span>
-              <span className="text-xs text-[#85858C]">Versão 1.0.0</span>
+              <span className="text-sm font-semibold text-[#F2F2F4] block">Sobre o VITAL</span>
+              <span className="text-xs text-[#85858C]">Versão 1.0.0 • Repositório GitHub</span>
             </div>
           </div>
           <ChevronRight className="w-4 h-4 text-[#85858C] group-hover:text-white transition-colors" />
