@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">VITAL</string>
+    <string name="health_connect_rationale">O aplicativo VITAL precisa de acesso às suas métricas de passos, sono, frequência cardíaca e treinos para compor seu painel unificado de saúde e fornecer resumos contextuais de bem-estar.</string>
+</resources>
