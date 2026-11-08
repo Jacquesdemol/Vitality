@@ -219,7 +219,6 @@ export default function App() {
               onOpenPrivacy={() => setIsPrivacyOpen(true)}
               onOpenAbout={() => setIsAboutOpen(true)}
               onOpenCustomizeWidgets={() => setIsCustomizeWidgetsOpen(true)}
-              onOpenAndroidExport={() => setIsAndroidModalOpen(true)}
               onToggleDemoMode={handleToggleDemoMode}
               onOpenOptionsMenu={() => setIsOptionsMenuOpen(true)}
             />
@@ -283,7 +282,6 @@ export default function App() {
       <AboutModal
         isOpen={isAboutOpen}
         onClose={() => setIsAboutOpen(false)}
-        onOpenAndroidExport={() => setIsAndroidModalOpen(true)}
       />
 
       <OptionsMenuModal
@@ -294,7 +292,6 @@ export default function App() {
         onOpenCustomizeWidgets={() => setIsCustomizeWidgetsOpen(true)}
         onOpenHealthConnect={() => setIsHealthConnectModalOpen(true)}
         onOpenZepp={() => setIsZeppModalOpen(true)}
-        onOpenAndroidExport={() => setIsAndroidModalOpen(true)}
         onOpenGoals={() => {
           setProfileGoalsTab('goals');
           setIsProfileGoalsOpen(true);

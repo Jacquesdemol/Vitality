@@ -4,13 +4,11 @@ import { X, Info, Code2, Layers, ShieldCheck, Heart } from 'lucide-react';
 interface AboutModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onOpenAndroidExport: () => void;
 }
 
 export const AboutModal: React.FC<AboutModalProps> = ({
   isOpen,
   onClose,
-  onOpenAndroidExport,
 }) => {
   if (!isOpen) return null;
 
@@ -76,17 +74,6 @@ export const AboutModal: React.FC<AboutModalProps> = ({
               </li>
             </ul>
           </div>
-
-          <button
-            onClick={() => {
-              onClose();
-              onOpenAndroidExport();
-            }}
-            className="w-full py-2.5 px-4 rounded-xl bg-[#242428] text-white hover:bg-[#323238] transition-colors flex items-center justify-center gap-2 font-semibold"
-          >
-            <Code2 className="w-4 h-4" />
-            <span>Ver e Baixar Projeto Android Studio (.zip)</span>
-          </button>
         </div>
 
         <div className="pt-3 border-t border-white/5 flex justify-end">

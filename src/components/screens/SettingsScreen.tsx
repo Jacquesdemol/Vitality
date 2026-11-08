@@ -8,11 +8,7 @@ import {
   Info,
   ChevronRight,
   SlidersHorizontal,
-  Code2,
-  Database,
-  RefreshCw,
   MoreVertical,
-  Check,
 } from 'lucide-react';
 import { UserProfile, ZeppConnectorState } from '../../types/vital.ts';
 
@@ -26,7 +22,6 @@ interface SettingsScreenProps {
   onOpenPrivacy: () => void;
   onOpenAbout: () => void;
   onOpenCustomizeWidgets: () => void;
-  onOpenAndroidExport: () => void;
   onToggleDemoMode: () => void;
   onOpenOptionsMenu: () => void;
 }
@@ -41,7 +36,6 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   onOpenPrivacy,
   onOpenAbout,
   onOpenCustomizeWidgets,
-  onOpenAndroidExport,
   onToggleDemoMode,
   onOpenOptionsMenu,
 }) => {
@@ -133,6 +127,23 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           <ChevronRight className="w-4 h-4 text-[#85858C] group-hover:text-white transition-colors" />
         </button>
 
+        {/* Personalizar Widgets */}
+        <button
+          onClick={onOpenCustomizeWidgets}
+          className="w-full p-3 rounded-2xl flex items-center justify-between text-left hover:bg-[#242428]/50 transition-colors group"
+        >
+          <div className="flex items-center gap-3.5">
+            <div className="w-9 h-9 rounded-xl bg-[#242428] flex items-center justify-center text-white flex-shrink-0">
+              <SlidersHorizontal className="w-4 h-4 text-white/90" />
+            </div>
+            <div>
+              <span className="text-sm font-semibold text-[#F2F2F4] block">Personalizar Widgets</span>
+              <span className="text-xs text-[#85858C]">Reorganizar, redimensionar e ocultar</span>
+            </div>
+          </div>
+          <ChevronRight className="w-4 h-4 text-[#85858C] group-hover:text-white transition-colors" />
+        </button>
+
         {/* Privacidade */}
         <button
           onClick={onOpenPrivacy}
@@ -162,46 +173,6 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <div>
               <span className="text-sm font-semibold text-[#F2F2F4] block">Sobre o app</span>
               <span className="text-xs text-[#85858C]">Versão 1.0.0</span>
-            </div>
-          </div>
-          <ChevronRight className="w-4 h-4 text-[#85858C] group-hover:text-white transition-colors" />
-        </button>
-      </div>
-
-      {/* Advanced Features & Android Project Export Section */}
-      <div className="flex flex-col gap-2 rounded-3xl bg-[#171719] border border-white/5 p-2 sm:p-3 shadow-sm">
-        {/* Personalizar Widgets */}
-        <button
-          onClick={onOpenCustomizeWidgets}
-          className="w-full p-3 rounded-2xl flex items-center justify-between text-left hover:bg-[#242428]/50 transition-colors group"
-        >
-          <div className="flex items-center gap-3.5">
-            <div className="w-9 h-9 rounded-xl bg-[#242428] flex items-center justify-center text-white flex-shrink-0">
-              <SlidersHorizontal className="w-4 h-4 text-white/90" />
-            </div>
-            <div>
-              <span className="text-sm font-semibold text-[#F2F2F4] block">Personalizar Widgets</span>
-              <span className="text-xs text-[#85858C]">Reorganizar, redimensionar e ocultar</span>
-            </div>
-          </div>
-          <ChevronRight className="w-4 h-4 text-[#85858C] group-hover:text-white transition-colors" />
-        </button>
-
-        {/* Projeto Android Studio Nativo (Kotlin + Jetpack Compose) */}
-        <button
-          onClick={onOpenAndroidExport}
-          className="w-full p-3 rounded-2xl flex items-center justify-between text-left hover:bg-[#242428]/50 transition-colors group bg-gradient-to-r from-transparent to-white/[0.03]"
-        >
-          <div className="flex items-center gap-3.5">
-            <div className="w-9 h-9 rounded-xl bg-[#242428] flex items-center justify-center text-white flex-shrink-0 border border-white/10">
-              <Code2 className="w-4 h-4 text-white" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-semibold text-[#F2F2F4]">Projeto Android Studio</span>
-                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-white text-black font-bold">KOTLIN</span>
-              </div>
-              <span className="text-xs text-[#85858C]">Código Compose + Health Connect e download .ZIP</span>
             </div>
           </div>
           <ChevronRight className="w-4 h-4 text-[#85858C] group-hover:text-white transition-colors" />
