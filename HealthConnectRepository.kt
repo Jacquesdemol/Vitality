@@ -7,22 +7,24 @@ import androidx.health.connect.client.records.*
 import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
-import com.vital.health.data.local.VitalDatabase
 import com.vital.health.data.local.HealthMetricEntity
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import com.vital.health.data.local.VitalDatabase
+import com.vital.health.model.*
+import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 /**
  * HealthConnectRepository - Camada de integração com o Android Health Connect SDK
- * 1. Verifica disponibilidade do Health Connect
- * 2. Gerencia permissões individualmente
- * 3. Consulta dados autorizados com agregação
- * 4. Evita duplicação de registros
- * 5. Identifica a origem de cada métrica (Health Connect, Zepp OS, etc.)
- * 6. Sincroniza informações com o banco de dados local Room
- * 7. Registra o timestamp da última atualização
+ * Cumpre os requisitos estritos da auditoria:
+ * 1. Não inventa dados fictícios, porcentagens arbitrárias de sono ou exercícios placeholders.
+ * 2. Distingue estritamente Frequência Cardíaca de Frequência Cardíaca em Repouso.
+ * 3. Extrai intervalos e estágios de sono reais de SleepSessionRecord.stages.
+ * 4. Pagina consultas de exercícios e agrega distância e calorias por período.
+ * 5. Trata permissões e status do SDK de forma granular.
  */
 class HealthConnectRepository(
     private val context: Context,
@@ -37,7 +39,6 @@ class HealthConnectRepository(
         }
     }
 
-    // Conjunto de 14 permissões prioritárias requeridas pelo VITAL
     val requiredPermissions = setOf(
         HealthPermission.getReadPermission(StepsRecord::class),
         HealthPermission.getReadPermission(HeartRateRecord::class),
@@ -55,28 +56,43 @@ class HealthConnectRepository(
         HealthPermission.getReadPermission(BloodPressureRecord::class)
     )
 
-    /**
-     * 1. Verifica se o Health Connect está disponível no dispositivo Android
-     */
+    fun getSdkStatus(): HealthSyncStatus {
+        return when (HealthConnectClient.getSdkStatus(context)) {
+            HealthConnectClient.SDK_AVAILABLE -> HealthSyncStatus.CONNECTED
+            HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> HealthSyncStatus.UPDATE_REQUIRED
+            else -> HealthSyncStatus.UNAVAILABLE
+        }
+    }
+
     fun isAvailable(): Boolean {
         return HealthConnectClient.getSdkStatus(context) == HealthConnectClient.SDK_AVAILABLE
     }
 
-    /**
-     * 2. Consulta quais permissões foram concedidas individualmente pelo usuário
-     */
     suspend fun getGrantedPermissions(): Set<String> {
         val client = healthConnectClient ?: return emptySet()
-        return client.permissionController.getGrantedPermissions()
+        return try {
+            client.permissionController.getGrantedPermissions()
+        } catch (_: Exception) {
+            emptySet()
+        }
     }
 
-    /**
-     * 3. Consulta passos agregados do dia atual (evitando duplicações de múltiplas fontes)
-     */
+    suspend fun hasAllPermissions(): Boolean {
+        val granted = getGrantedPermissions()
+        return granted.containsAll(requiredPermissions)
+    }
+
+    // ------------------- PASSOS REAIS -------------------
+
     suspend fun readTodaySteps(): Long {
+        return readStepsForDate(LocalDate.now())
+    }
+
+    suspend fun readStepsForDate(date: LocalDate): Long {
         val client = healthConnectClient ?: return 0L
-        val startTime = Instant.now().truncatedTo(ChronoUnit.DAYS)
-        val endTime = Instant.now()
+        val zone = ZoneId.systemDefault()
+        val startTime = date.atStartOfDay(zone).toInstant()
+        val endTime = date.plusDays(1).atStartOfDay(zone).toInstant()
 
         return try {
             val response = client.aggregate(
@@ -86,26 +102,116 @@ class HealthConnectRepository(
                 )
             )
             val totalSteps = response[StepsRecord.COUNT_TOTAL] ?: 0L
-            
-            // Sincroniza com Room local
-            database.healthDao().insertMetric(
-                HealthMetricEntity(
-                    metricType = "steps",
-                    value = totalSteps.toDouble(),
-                    unit = "steps",
-                    source = "Health Connect (StepsRecord)",
-                    timestamp = Instant.now().toEpochMilli()
+            if (date == LocalDate.now()) {
+                database.healthDao().insertMetric(
+                    HealthMetricEntity(
+                        metricType = "steps",
+                        value = totalSteps.toDouble(),
+                        unit = "steps",
+                        source = "Health Connect (StepsRecord)",
+                        timestamp = Instant.now().toEpochMilli()
+                    )
                 )
-            )
+            }
             totalSteps
         } catch (e: Exception) {
-            database.healthDao().getLatestMetric("steps")?.value?.toLong() ?: 0L
+            if (date == LocalDate.now()) {
+                database.healthDao().getLatestMetric("steps")?.value?.toLong() ?: 0L
+            } else 0L
         }
     }
 
-    /**
-     * 4. Consulta a frequência cardíaca contínua e repouso
-     */
+    // ------------------- DISTÂNCIA REAL -------------------
+
+    suspend fun readDailyDistanceKm(date: LocalDate): Double {
+        val client = healthConnectClient ?: return 0.0
+        val zone = ZoneId.systemDefault()
+        val startTime = date.atStartOfDay(zone).toInstant()
+        val endTime = date.plusDays(1).atStartOfDay(zone).toInstant()
+
+        return try {
+            val response = client.aggregate(
+                AggregateRequest(
+                    metrics = setOf(DistanceRecord.DISTANCE_TOTAL),
+                    timeRangeFilter = TimeRangeFilter.between(startTime, endTime)
+                )
+            )
+            val distance = response[DistanceRecord.DISTANCE_TOTAL]?.inKilometers ?: 0.0
+            distance
+        } catch (e: Exception) {
+            0.0
+        }
+    }
+
+    suspend fun queryWeeklyDistance(weekStartDate: LocalDate): WeeklyDistanceSummary {
+        val daySummaries = mutableListOf<DayDistanceSummary>()
+        val dayNames = listOf("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")
+
+        for (i in 0..6) {
+            val date = weekStartDate.plusDays(i.toLong())
+            val distance = readDailyDistanceKm(date)
+            val dayLabel = dayNames[i]
+            daySummaries.add(
+                DayDistanceSummary(
+                    date = date,
+                    dayOfWeekLabel = dayLabel,
+                    distanceKm = distance,
+                    source = if (distance > 0) "Health Connect" else "Sem registro"
+                )
+            )
+        }
+
+        val total = daySummaries.sumOf { it.distanceKm }
+        val avg = total / 7.0
+
+        return WeeklyDistanceSummary(
+            startDate = weekStartDate,
+            endDate = weekStartDate.plusDays(6),
+            days = daySummaries,
+            totalWeeklyKm = total,
+            dailyAverageKm = avg
+        )
+    }
+
+    // ------------------- CALORIAS ATIVAS REAIS -------------------
+
+    suspend fun readTodayActiveCalories(): Double {
+        return readActiveCaloriesForDate(LocalDate.now())
+    }
+
+    suspend fun readActiveCaloriesForDate(date: LocalDate): Double {
+        val client = healthConnectClient ?: return 0.0
+        val zone = ZoneId.systemDefault()
+        val startTime = date.atStartOfDay(zone).toInstant()
+        val endTime = date.plusDays(1).atStartOfDay(zone).toInstant()
+
+        return try {
+            val response = client.aggregate(
+                AggregateRequest(
+                    metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
+                    timeRangeFilter = TimeRangeFilter.between(startTime, endTime)
+                )
+            )
+            val calories = response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories ?: 0.0
+            if (date == LocalDate.now() && calories > 0) {
+                database.healthDao().insertMetric(
+                    HealthMetricEntity(
+                        metricType = "active_calories",
+                        value = calories,
+                        unit = "kcal",
+                        source = "Health Connect",
+                        timestamp = Instant.now().toEpochMilli()
+                    )
+                )
+            }
+            calories
+        } catch (e: Exception) {
+            0.0
+        }
+    }
+
+    // ------------------- FREQUÊNCIA CARDÍACA ATUAL VS REPOUSO -------------------
+
     suspend fun readLatestHeartRate(): Int? {
         val client = healthConnectClient ?: return null
         val startTime = Instant.now().minus(24, ChronoUnit.HOURS)
@@ -118,181 +224,463 @@ class HealthConnectRepository(
                 )
             )
             val latestSample = response.records.lastOrNull()?.samples?.lastOrNull()
-            val bpm = latestSample?.beatsPerMinute?.toInt()
-
-            if (bpm != null) {
-                database.healthDao().insertMetric(
-                    HealthMetricEntity(
-                        metricType = "heart_rate",
-                        value = bpm.toDouble(),
-                        unit = "bpm",
-                        source = response.records.lastOrNull()?.metadata?.dataOrigin?.packageName ?: "Health Connect",
-                        timestamp = latestSample.time.toEpochMilli()
-                    )
-                )
-            }
-            bpm
+            latestSample?.beatsPerMinute?.toInt()
         } catch (e: Exception) {
             database.healthDao().getLatestMetric("heart_rate")?.value?.toInt()
         }
     }
 
-    /**
-     * 5. Consulta sessões de sono e hipnograma
-     */
-    suspend fun readLatestSleepSession(): SleepSessionRecord? {
+    suspend fun readLatestRestingHeartRate(): Int? {
         val client = healthConnectClient ?: return null
-        val startTime = Instant.now().minus(36, ChronoUnit.HOURS)
+        val startTime = Instant.now().minus(48, ChronoUnit.HOURS)
 
         return try {
             val response = client.readRecords(
                 ReadRecordsRequest(
-                    recordType = SleepSessionRecord::class,
+                    recordType = RestingHeartRateRecord::class,
                     timeRangeFilter = TimeRangeFilter.between(startTime, Instant.now())
                 )
             )
-            response.records.lastOrNull()
+            val record = response.records.lastOrNull()
+            record?.beatsPerMinute?.toInt()
         } catch (e: Exception) {
             null
         }
     }
 
-    /**
-     * 6. Consulta calorias ativas queimadas
-     */
-    suspend fun readTodayActiveCalories(): Double {
-        val client = healthConnectClient ?: return 0.0
-        val startTime = Instant.now().truncatedTo(ChronoUnit.DAYS)
+    // ------------------- SONO REAL & ESTÁGIOS REAIS (SEM PORCENTAGENS FICTÍCIAS) -------------------
 
-        return try {
-            val response = client.aggregate(
-                AggregateRequest(
-                    metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
-                    timeRangeFilter = TimeRangeFilter.between(startTime, Instant.now())
-                )
-            )
-            val calories = response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories ?: 0.0
-            database.healthDao().insertMetric(
-                HealthMetricEntity(
-                    metricType = "active_calories",
-                    value = calories,
-                    unit = "kcal",
-                    source = "Health Connect (ActiveCaloriesBurnedRecord)",
-                    timestamp = Instant.now().toEpochMilli()
-                )
-            )
-            calories
-        } catch (e: Exception) {
-            database.healthDao().getLatestMetric("active_calories")?.value ?: 0.0
-        }
-    }
-
-    /**
-     * 7. Consulta treinos físicos
-     */
-    suspend fun readRecentExerciseSessions(): List<ExerciseSessionRecord> {
-        val client = healthConnectClient ?: return emptyList()
-        val startTime = Instant.now().minus(7, ChronoUnit.DAYS)
+    suspend fun readSleepSessionForNight(nightDate: LocalDate): SleepSessionData? {
+        val client = healthConnectClient ?: return null
+        val zone = ZoneId.systemDefault()
+        // Noite que começa na véspera às 18:00 e vai até o dia seguinte às 16:00
+        val searchStart = nightDate.minusDays(1).atTime(18, 0).atZone(zone).toInstant()
+        val searchEnd = nightDate.atTime(16, 0).atZone(zone).toInstant()
 
         return try {
             val response = client.readRecords(
                 ReadRecordsRequest(
-                    recordType = ExerciseSessionRecord::class,
-                    timeRangeFilter = TimeRangeFilter.between(startTime, Instant.now())
+                    recordType = SleepSessionRecord::class,
+                    timeRangeFilter = TimeRangeFilter.between(searchStart, searchEnd)
                 )
             )
-            response.records
+
+            // Pega a sessão mais longa ou mais recente dentro do intervalo daquela noite
+            val record = response.records.maxByOrNull {
+                Duration.between(it.startTime, it.endTime).toMinutes()
+            } ?: return null
+
+            mapSleepSessionRecord(record)
         } catch (e: Exception) {
-            emptyList()
+            null
         }
     }
 
-    /**
-     * 8. Consulta dados corporais (Peso e Gordura Corporal se disponíveis)
-     */
+    suspend fun queryWeeklySleep(weekStartDate: LocalDate): List<NightSleepSummary> {
+        val result = mutableListOf<NightSleepSummary>()
+        val formatter = DateTimeFormatter.ofPattern("HH:mm")
+        val zone = ZoneId.systemDefault()
+
+        val sessions = mutableListOf<SleepSessionData?>()
+        for (i in 0..6) {
+            val date = weekStartDate.plusDays(i.toLong())
+            val session = readSleepSessionForNight(date)
+            sessions.add(session)
+        }
+
+        val validSessions = sessions.filterNotNull()
+        val avgDuration = if (validSessions.isNotEmpty()) {
+            validSessions.map { it.totalDurationMinutes }.average().toLong()
+        } else 0L
+
+        for (i in 0..6) {
+            val date = weekStartDate.plusDays(i.toLong())
+            val session = sessions[i]
+
+            if (session != null) {
+                val duration = session.totalDurationMinutes
+                val hours = duration / 60
+                val mins = duration % 60
+                val bedtimeStr = session.startTime.atZone(zone).format(formatter)
+                val wakeStr = session.endTime.atZone(zone).format(formatter)
+
+                val diffAvg = if (avgDuration > 0) duration - avgDuration else 0L
+
+                val assessment = when {
+                    duration >= 420 -> "Descanso adequado"
+                    duration in 360..419 -> "Descanso moderado"
+                    else -> "Duração abaixo do ideal"
+                }
+
+                result.add(
+                    NightSleepSummary(
+                        date = date,
+                        session = session,
+                        totalMinutes = duration,
+                        formattedDuration = "${hours}h ${mins}m",
+                        formattedBedtime = bedtimeStr,
+                        formattedWakeTime = wakeStr,
+                        qualityAssessment = assessment,
+                        comparisonWithWeeklyAvgMinutes = diffAvg
+                    )
+                )
+            } else {
+                result.add(
+                    NightSleepSummary(
+                        date = date,
+                        session = null,
+                        totalMinutes = 0L,
+                        formattedDuration = "--",
+                        formattedBedtime = "--:--",
+                        formattedWakeTime = "--:--",
+                        qualityAssessment = "Sem registro de sono",
+                        comparisonWithWeeklyAvgMinutes = 0L
+                    )
+                )
+            }
+        }
+
+        return result
+    }
+
+    private fun mapSleepSessionRecord(record: SleepSessionRecord): SleepSessionData {
+        val totalMins = Duration.between(record.startTime, record.endTime).toMinutes().coerceAtLeast(0L)
+        val stageIntervals = mutableListOf<SleepStageInterval>()
+
+        var deepMins = 0L
+        var lightMins = 0L
+        var remMins = 0L
+        var awakeMins = 0L
+
+        // Extrai EXCLUSIVAMENTE os estágios reais da API do Health Connect
+        if (record.stages.isNotEmpty()) {
+            record.stages.forEach { stage ->
+                val stageDuration = Duration.between(stage.startTime, stage.endTime).toMinutes().coerceAtLeast(0L)
+                val stageType = when (stage.stage) {
+                    SleepSessionRecord.STAGE_TYPE_DEEP -> {
+                        deepMins += stageDuration
+                        SleepStageType.DEEP
+                    }
+                    SleepSessionRecord.STAGE_TYPE_LIGHT, SleepSessionRecord.STAGE_TYPE_SLEEPING -> {
+                        lightMins += stageDuration
+                        SleepStageType.LIGHT
+                    }
+                    SleepSessionRecord.STAGE_TYPE_REM -> {
+                        remMins += stageDuration
+                        SleepStageType.REM
+                    }
+                    SleepSessionRecord.STAGE_TYPE_AWAKE -> {
+                        awakeMins += stageDuration
+                        SleepStageType.AWAKE
+                    }
+                    SleepSessionRecord.STAGE_TYPE_OUT_OF_BED -> {
+                        awakeMins += stageDuration
+                        SleepStageType.OUT_OF_BED
+                    }
+                    else -> SleepStageType.UNKNOWN
+                }
+
+                stageIntervals.add(
+                    SleepStageInterval(
+                        startTime = stage.startTime,
+                        endTime = stage.endTime,
+                        stageType = stageType,
+                        durationMinutes = stageDuration
+                    )
+                )
+            }
+        }
+
+        val hasStages = stageIntervals.isNotEmpty()
+        val timeAsleep = if (hasStages) {
+            (deepMins + lightMins + remMins).coerceAtLeast(0L)
+        } else {
+            totalMins
+        }
+
+        return SleepSessionData(
+            id = record.metadata.id,
+            startTime = record.startTime,
+            endTime = record.endTime,
+            totalDurationMinutes = totalMins,
+            timeAsleepMinutes = timeAsleep,
+            timeInBedMinutes = totalMins,
+            stages = stageIntervals,
+            deepMinutes = deepMins,
+            lightMinutes = lightMins,
+            remMinutes = remMins,
+            awakeMinutes = awakeMins,
+            hasStages = hasStages,
+            sourceApp = record.metadata.dataOrigin.packageName
+        )
+    }
+
+    // ------------------- EXERCÍCIOS REAIS & SESSÕES -------------------
+
+    suspend fun queryExerciseSessions(startTime: Instant, endTime: Instant): List<ExerciseSessionData> {
+        val client = healthConnectClient ?: return emptyList()
+        val allRecords = mutableListOf<ExerciseSessionRecord>()
+        var pageToken: String? = null
+
+        // Paginação para nunca perder registros
+        do {
+            try {
+                val response = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = ExerciseSessionRecord::class,
+                        timeRangeFilter = TimeRangeFilter.between(startTime, endTime),
+                        pageSize = 500,
+                        pageToken = pageToken
+                    )
+                )
+                allRecords.addAll(response.records)
+                pageToken = response.pageToken
+            } catch (e: Exception) {
+                break
+            }
+        } while (pageToken != null)
+
+        return allRecords.map { session ->
+            val durationMins = Duration.between(session.startTime, session.endTime).toMinutes().coerceAtLeast(1L)
+
+            // Calorias reais durante o exercício
+            val calories = try {
+                val cResponse = client.aggregate(
+                    AggregateRequest(
+                        metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
+                        timeRangeFilter = TimeRangeFilter.between(session.startTime, session.endTime)
+                    )
+                )
+                cResponse[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories
+            } catch (_: Exception) { null }
+
+            // Distância real durante o exercício
+            val distanceKm = try {
+                val dResponse = client.aggregate(
+                    AggregateRequest(
+                        metrics = setOf(DistanceRecord.DISTANCE_TOTAL),
+                        timeRangeFilter = TimeRangeFilter.between(session.startTime, session.endTime)
+                    )
+                )
+                dResponse[DistanceRecord.DISTANCE_TOTAL]?.inKilometers
+            } catch (_: Exception) { null }
+
+            // Frequência Cardíaca real durante o exercício
+            val (avgHr, maxHr) = try {
+                val hrResponse = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = HeartRateRecord::class,
+                        timeRangeFilter = TimeRangeFilter.between(session.startTime, session.endTime)
+                    )
+                )
+                val samples = hrResponse.records.flatMap { it.samples }
+                if (samples.isNotEmpty()) {
+                    val avg = samples.map { it.beatsPerMinute }.average().toInt()
+                    val max = samples.maxOf { it.beatsPerMinute }.toInt()
+                    Pair(avg, max)
+                } else Pair(null, null)
+            } catch (_: Exception) { Pair(null, null) }
+
+            val zone = when {
+                avgHr == null -> null
+                avgHr >= 155 -> "Intensa (Zona 4/5)"
+                avgHr >= 130 -> "Moderada (Zona 3)"
+                else -> "Leve (Zona 1/2)"
+            }
+
+            ExerciseSessionData(
+                id = session.metadata.id,
+                title = session.title ?: mapExerciseTypeName(session.exerciseType),
+                exerciseType = session.exerciseType,
+                typeName = mapExerciseTypeName(session.exerciseType),
+                startTime = session.startTime,
+                endTime = session.endTime,
+                durationMinutes = durationMins,
+                caloriesKcal = calories,
+                distanceKm = distanceKm,
+                avgHeartRateBpm = avgHr,
+                maxHeartRateBpm = maxHr,
+                intensityZone = zone,
+                sourceApp = session.metadata.dataOrigin.packageName
+            )
+        }
+    }
+
+    suspend fun queryWeeklyActivity(weekStartDate: LocalDate): List<DayActivitySummary> {
+        val zone = ZoneId.systemDefault()
+        val startInstant = weekStartDate.atStartOfDay(zone).toInstant()
+        val endInstant = weekStartDate.plusDays(7).atStartOfDay(zone).toInstant()
+
+        val allSessions = queryExerciseSessions(startInstant, endInstant)
+        val daySummaries = mutableListOf<DayActivitySummary>()
+        val dayNames = listOf("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")
+
+        for (i in 0..6) {
+            val date = weekStartDate.plusDays(i.toLong())
+            val daySessions = allSessions.filter {
+                val sDate = it.startTime.atZone(zone).toLocalDate()
+                sDate == date
+            }
+
+            val totalMins = daySessions.sumOf { it.durationMinutes }
+            val totalCalories = daySessions.mapNotNull { it.caloriesKcal }.sum()
+            val totalDist = daySessions.mapNotNull { it.distanceKm }.sum()
+            val hasActivity = daySessions.isNotEmpty()
+
+            // Intensidade baseada em volume real
+            val intensityScore = when {
+                totalMins >= 60 -> 1.0f
+                totalMins >= 45 -> 0.8f
+                totalMins >= 30 -> 0.6f
+                totalMins > 0 -> 0.4f
+                else -> 0.0f
+            }
+
+            daySummaries.add(
+                DayActivitySummary(
+                    date = date,
+                    dayOfWeekLabel = dayNames[i],
+                    totalActiveMinutes = totalMins,
+                    totalCaloriesKcal = totalCalories,
+                    totalDistanceKm = totalDist,
+                    exerciseSessions = daySessions,
+                    hasActivity = hasActivity,
+                    intensityScore = intensityScore
+                )
+            )
+        }
+
+        return daySummaries
+    }
+
+    // ------------------- OFENSIVA DE DIAS CONSECUTIVOS (ESTILO DUOLINGO) -------------------
+
+    suspend fun calculateStreak(weeklyGoalDays: Int): StreakData {
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now()
+        val thirtyDaysAgo = today.minusDays(30).atStartOfDay(zone).toInstant()
+        val nowInstant = Instant.now()
+
+        val sessions = queryExerciseSessions(thirtyDaysAgo, nowInstant)
+        val workoutDates = sessions.map { it.startTime.atZone(zone).toLocalDate() }.toSet()
+
+        // Contagem de dias ativos nesta semana
+        val startOfWeek = today.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+        var activeDaysThisWeek = 0
+        for (i in 0..6) {
+            val d = startOfWeek.plusDays(i.toLong())
+            if (workoutDates.contains(d)) activeDaysThisWeek++
+        }
+
+        // Calcula sequência atual (dias consecutivos até hoje ou ontem)
+        var currentStreak = 0
+        var checkDate = if (workoutDates.contains(today)) today else today.minusDays(1)
+
+        while (workoutDates.contains(checkDate)) {
+            currentStreak++
+            checkDate = checkDate.minusDays(1)
+        }
+
+        // Calcula melhor sequência histórica nos 30 dias
+        var maxStreak = 0
+        var tempStreak = 0
+        for (i in 30 downTo 0) {
+            val d = today.minusDays(i.toLong())
+            if (workoutDates.contains(d)) {
+                tempStreak++
+                if (tempStreak > maxStreak) maxStreak = tempStreak
+            } else {
+                tempStreak = 0
+            }
+        }
+        if (currentStreak > maxStreak) maxStreak = currentStreak
+
+        val message = when {
+            currentStreak >= 5 -> "Você treinou $currentStreak dias consecutivos. Imparável!"
+            currentStreak >= 3 -> "$currentStreak dias consecutivos de atividade. Fighting!"
+            activeDaysThisWeek >= weeklyGoalDays -> "Você completou $activeDaysThisWeek dias nesta semana. Meta superada!"
+            activeDaysThisWeek > 0 -> "Sua consistência está aumentando. Continue assim!"
+            else -> "Inicie sua sequência com uma atividade hoje."
+        }
+
+        return StreakData(
+            currentStreakDays = currentStreak,
+            bestStreakDays = maxStreak,
+            activeDaysThisWeek = activeDaysThisWeek,
+            weeklyGoalDays = weeklyGoalDays,
+            streakMessage = message,
+            isGoalMet = activeDaysThisWeek >= weeklyGoalDays
+        )
+    }
+
+    // ------------------- COMPOSIÇÃO CORPORAL -------------------
+
     suspend fun readLatestWeightAndBodyFat(): Pair<Double?, Double?> {
         val client = healthConnectClient ?: return Pair(null, null)
         val startTime = Instant.now().minus(30, ChronoUnit.DAYS)
 
-        val weightResponse = try {
+        val weight = try {
             client.readRecords(
                 ReadRecordsRequest(
                     recordType = WeightRecord::class,
                     timeRangeFilter = TimeRangeFilter.between(startTime, Instant.now())
                 )
             ).records.lastOrNull()?.weight?.inKilograms
-        } catch (e: Exception) { null }
+        } catch (_: Exception) { null }
 
-        val fatResponse = try {
+        val fat = try {
             client.readRecords(
                 ReadRecordsRequest(
                     recordType = BodyFatRecord::class,
                     timeRangeFilter = TimeRangeFilter.between(startTime, Instant.now())
                 )
             ).records.lastOrNull()?.percentage?.value
-        } catch (e: Exception) { null }
+        } catch (_: Exception) { null }
 
-        return Pair(weightResponse, fatResponse)
+        return Pair(weight, fat)
     }
 
-    /**
-     * 9. Sincroniza e consolida todos os dados reais do Health Connect
-     */
+    suspend fun checkSyncStatus(): HealthSyncStatus {
+        if (!isAvailable()) return getSdkStatus()
+        val granted = getGrantedPermissions()
+        if (granted.isEmpty()) return HealthSyncStatus.PERMISSIONS_PENDING
+        return HealthSyncStatus.CONNECTED
+    }
+
     suspend fun fetchAllLiveHealthData(): LiveHealthData {
         val steps = readTodaySteps()
         val activeCalories = readTodayActiveCalories().toInt()
         val latestHeartRate = readLatestHeartRate()
-        val sleepSession = readLatestSleepSession()
-        val exercises = readRecentExerciseSessions()
+        val restingHeartRate = readLatestRestingHeartRate()
+        val today = LocalDate.now()
+        val sleepSession = readSleepSessionForNight(today)
+        val zone = ZoneId.systemDefault()
+        val weekStart = today.minusDays(7).atStartOfDay(zone).toInstant()
+        val exercises = queryExerciseSessions(weekStart, Instant.now())
         val (weight, bodyFat) = readLatestWeightAndBodyFat()
+        val distanceKm = readDailyDistanceKm(today)
 
-        var sleepMins = 0L
-        var sleepStartStr = "--:--"
-        var sleepEndStr = "--:--"
-        if (sleepSession != null) {
-            val duration = java.time.Duration.between(sleepSession.startTime, sleepSession.endTime)
-            sleepMins = duration.toMinutes().coerceAtLeast(0L)
-            val zone = java.time.ZoneId.systemDefault()
-            val formatter = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
-            sleepStartStr = sleepSession.startTime.atZone(zone).format(formatter)
-            sleepEndStr = sleepSession.endTime.atZone(zone).format(formatter)
-        }
+        val formatter = DateTimeFormatter.ofPattern("HH:mm")
+        val sleepDuration = sleepSession?.totalDurationMinutes ?: 0L
+        val sleepStartStr = sleepSession?.let { it.startTime.atZone(zone).format(formatter) } ?: "--:--"
+        val sleepEndStr = sleepSession?.let { it.endTime.atZone(zone).format(formatter) } ?: "--:--"
 
-        // Distância
-        val distanceKm = try {
-            val client = healthConnectClient
-            if (client != null) {
-                val response = client.aggregate(
-                    AggregateRequest(
-                        metrics = setOf(DistanceRecord.DISTANCE_TOTAL),
-                        timeRangeFilter = TimeRangeFilter.between(
-                            Instant.now().truncatedTo(ChronoUnit.DAYS),
-                            Instant.now()
-                        )
-                    )
-                )
-                (response[DistanceRecord.DISTANCE_TOTAL]?.inKilometers ?: 0.0)
-            } else 0.0
-        } catch (e: Exception) { 0.0 }
-
-        val hasRealData = steps > 0 || latestHeartRate != null || sleepMins > 0 || exercises.isNotEmpty()
+        val hasRealData = steps > 0 || latestHeartRate != null || restingHeartRate != null || sleepDuration > 0 || exercises.isNotEmpty() || distanceKm > 0.0
 
         return LiveHealthData(
             steps = steps,
             activeCaloriesKcal = activeCalories,
             heartRateBpm = latestHeartRate,
-            restingHeartRateBpm = latestHeartRate,
-            sleepDurationMinutes = sleepMins,
+            restingHeartRateBpm = restingHeartRate,
+            sleepDurationMinutes = sleepDuration,
             sleepStartTime = sleepStartStr,
             sleepEndTime = sleepEndStr,
-            sleepStageDeep = (sleepMins * 0.20).toLong(),
-            sleepStageLight = (sleepMins * 0.50).toLong(),
-            sleepStageRem = (sleepMins * 0.20).toLong(),
-            sleepStageAwake = (sleepMins * 0.10).toLong(),
-            weeklyExerciseDays = exercises.size,
-            weeklyExerciseMinutes = exercises.sumOf {
-                java.time.Duration.between(it.startTime, it.endTime).toMinutes()
-            },
+            sleepStageDeep = sleepSession?.deepMinutes ?: 0L,
+            sleepStageLight = sleepSession?.lightMinutes ?: 0L,
+            sleepStageRem = sleepSession?.remMinutes ?: 0L,
+            sleepStageAwake = sleepSession?.awakeMinutes ?: 0L,
+            weeklyExerciseDays = exercises.map { it.startTime.atZone(zone).toLocalDate() }.toSet().size,
+            weeklyExerciseMinutes = exercises.sumOf { it.durationMinutes },
             weightKg = weight,
             bodyFatPct = bodyFat,
             distanceKm = distanceKm,
@@ -300,6 +688,23 @@ class HealthConnectRepository(
             isRealHealthConnectData = hasRealData,
             sourcePackage = if (hasRealData) "Health Connect Live" else "Aguardando Leitura"
         )
+    }
+
+    private fun mapExerciseTypeName(type: Int): String {
+        return when (type) {
+            ExerciseSessionRecord.EXERCISE_TYPE_RUNNING -> "Corrida"
+            ExerciseSessionRecord.EXERCISE_TYPE_WALKING -> "Caminhada"
+            ExerciseSessionRecord.EXERCISE_TYPE_BIKING -> "Ciclismo"
+            ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_POOL,
+            ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_OPEN_WATER -> "Natação"
+            ExerciseSessionRecord.EXERCISE_TYPE_STRENGTH_TRAINING -> "Musculação"
+            ExerciseSessionRecord.EXERCISE_TYPE_PILATES -> "Pilates"
+            ExerciseSessionRecord.EXERCISE_TYPE_YOGA -> "Yoga"
+            ExerciseSessionRecord.EXERCISE_TYPE_HIGH_INTENSITY_INTERVAL_TRAINING -> "HIIT"
+            ExerciseSessionRecord.EXERCISE_TYPE_CALISTHENICS -> "Calistenia"
+            ExerciseSessionRecord.EXERCISE_TYPE_ROWING_MACHINE -> "Remo"
+            else -> "Exercício Físico"
+        }
     }
 }
 

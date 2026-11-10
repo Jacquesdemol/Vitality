@@ -2,6 +2,7 @@ package com.vital.health.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -9,7 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -20,32 +21,43 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vital.health.data.UserProfile
 import com.vital.health.healthconnect.LiveHealthData
-import com.vital.health.theme.*
-
-data class WorkoutItem(
-    val title: String,
-    val subtitle: String,
-    val icon: ImageVector
-)
+import com.vital.health.model.DayActivitySummary
+import com.vital.health.model.ExerciseSessionData
+import com.vital.health.model.StreakData
+import com.vital.health.theme.VitalTheme
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Composable
 fun ExerciseScreen(
     liveData: LiveHealthData,
-    userProfile: UserProfile
+    userProfile: UserProfile,
+    weeklyActivity: List<DayActivitySummary> = emptyList(),
+    streakData: StreakData? = null,
+    currentWeekOffset: Long = 0L,
+    onPreviousWeek: () -> Unit = {},
+    onNextWeek: () -> Unit = {}
 ) {
-    val workouts = listOf(
-        WorkoutItem("Musculação & Hipertrofia", "Hoje • 1 h 20 min • 412 kcal", Icons.Default.FitnessCenter),
-        WorkoutItem("Corrida ao ar livre", "Ontem • 45 min • 380 kcal", Icons.Default.DirectionsRun),
-        WorkoutItem("Ciclismo", "3 dias atrás • 50 min • 310 kcal", Icons.Default.DirectionsBike)
-    )
+    val colors = VitalTheme.colors
 
-    val activeHours = liveData.weeklyExerciseMinutes / 60
-    val activeMins = liveData.weeklyExerciseMinutes % 60
+    var selectedDayIndex by remember { mutableIntStateOf(weeklyActivity.size - 1) }
+
+    // Keep index clamped if weeklyActivity size changes
+    val safeIndex = selectedDayIndex.coerceIn(0, (weeklyActivity.size - 1).coerceAtLeast(0))
+    val selectedDay = if (weeklyActivity.isNotEmpty()) weeklyActivity[safeIndex] else null
+
+    val totalWeekMinutes = weeklyActivity.sumOf { it.totalActiveMinutes }
+    val totalWeekCalories = weeklyActivity.sumOf { it.totalCaloriesKcal }
+    val totalWeekDistance = weeklyActivity.sumOf { it.totalDistanceKm }
+
+    val activeHours = totalWeekMinutes / 60
+    val activeMins = totalWeekMinutes % 60
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(DeepBlack)
+            .background(colors.background)
             .padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -62,14 +74,14 @@ fun ExerciseScreen(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
-                        .background(Graphite)
-                        .border(1.dp, GlassBorder, CircleShape),
+                        .background(colors.surface)
+                        .border(1.dp, colors.cardBorder, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.FitnessCenter,
                         contentDescription = null,
-                        tint = CrispWhite,
+                        tint = colors.textPrimary,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -79,220 +91,369 @@ fun ExerciseScreen(
                 Column {
                     Text(
                         text = "Exercícios",
-                        color = CrispWhite,
+                        color = colors.textPrimary,
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = "Movimente-se. Seu corpo agradece!",
-                        color = MidGray,
+                        color = colors.textSecondary,
                         fontSize = 13.sp
                     )
                 }
             }
         }
 
-        // Card 1: Atividade da semana
-        item {
-            Card(
-                shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = Graphite),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, GlassBorder, RoundedCornerShape(28.dp))
-            ) {
-                Row(
+        // Streak & Consistency Banner
+        if (streakData != null) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(containerColor = colors.surface),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(18.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .border(1.dp, colors.cardBorder, RoundedCornerShape(22.dp))
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clip(CircleShape)
-                                .background(DarkGray),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.DirectionsRun,
-                                contentDescription = null,
-                                tint = CrispWhite,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(14.dp))
-
-                        Column {
-                            Text(
-                                text = "Atividade da semana",
-                                color = MidGray,
-                                fontSize = 12.sp
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = if (liveData.weeklyExerciseMinutes > 0) "${activeHours} h ${activeMins} min" else "4 h 20 min",
-                                    color = CrispWhite,
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "▲ +12%",
-                                    color = Color(0xFF66BB6A),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-
-                    // Bar Chart
                     Row(
-                        modifier = Modifier.height(44.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.Bottom
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        listOf(0.3f, 0.5f, 0.8f, 0.45f, 0.95f, 0.7f, 0.6f).forEach { h ->
-                            Box(
-                                modifier = Modifier
-                                    .width(5.dp)
-                                    .fillMaxHeight(h)
-                                    .clip(CircleShape)
-                                    .background(CrispWhite)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Card 2 & 3: Calorias ativas & Distância
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Calorias Ativas
-                Card(
-                    shape = RoundedCornerShape(26.dp),
-                    colors = CardDefaults.cardColors(containerColor = Graphite),
-                    modifier = Modifier
-                        .weight(1f)
-                        .border(1.dp, GlassBorder, RoundedCornerShape(26.dp))
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Default.LocalFireDepartment,
                                 contentDescription = null,
-                                tint = MidGray,
-                                modifier = Modifier.size(16.dp)
+                                tint = colors.streakFlame,
+                                modifier = Modifier.size(22.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Calorias ativas",
-                                color = MidGray,
-                                fontSize = 12.sp
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Text(
-                                text = if (liveData.activeCaloriesKcal > 0) "${liveData.activeCaloriesKcal}" else "1.820",
-                                color = CrispWhite,
-                                fontSize = 22.sp,
+                                text = "${streakData.currentStreakDays} dias de ofensiva",
+                                color = colors.textPrimary,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "kcal",
-                                color = MidGray,
-                                fontSize = 12.sp,
-                                modifier = Modifier.padding(bottom = 3.dp)
-                            )
                         }
-
-                        Spacer(modifier = Modifier.height(4.dp))
 
                         Text(
-                            text = "Meta: ${userProfile.goals.dailyCalories} kcal",
-                            color = MidGray,
-                            fontSize = 11.sp
-                        )
-                    }
-                }
-
-                // Distância
-                Card(
-                    shape = RoundedCornerShape(26.dp),
-                    colors = CardDefaults.cardColors(containerColor = Graphite),
-                    modifier = Modifier
-                        .weight(1f)
-                        .border(1.dp, GlassBorder, RoundedCornerShape(26.dp))
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Navigation,
-                                contentDescription = null,
-                                tint = MidGray,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Distância",
-                                color = MidGray,
-                                fontSize = 12.sp
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Text(
-                                text = if (liveData.distanceKm > 0.0) String.format("%.1f", liveData.distanceKm) else "14,6",
-                                color = CrispWhite,
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "km",
-                                color = MidGray,
-                                fontSize = 12.sp,
-                                modifier = Modifier.padding(bottom = 3.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        Text(
-                            text = "▲ +10% nesta semana",
-                            color = Color(0xFF66BB6A),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
+                            text = "${streakData.activeDaysThisWeek}/${streakData.weeklyGoalDays} dias cumpridos",
+                            color = colors.textSecondary,
+                            fontSize = 12.sp
                         )
                     }
                 }
             }
         }
 
-        // Card 4: Citação Real Motivacional sobre Treino
+        // Card 1: Interactive 7-Day Activity Chart with Week Navigation
+        item {
+            Card(
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, colors.cardBorder, RoundedCornerShape(28.dp))
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    // Week navigation row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = onPreviousWeek,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(colors.surfaceVariant)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChevronLeft,
+                                contentDescription = "Semana anterior",
+                                tint = colors.textPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            val weekLabel = if (currentWeekOffset == 0L) "Esta Semana" else "${Math.abs(currentWeekOffset)} sem atrás"
+                            Text(
+                                text = weekLabel,
+                                color = colors.textPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (weeklyActivity.isNotEmpty()) {
+                                val startD = weeklyActivity.first().date.format(DateTimeFormatter.ofPattern("dd/MM"))
+                                val endD = weeklyActivity.last().date.format(DateTimeFormatter.ofPattern("dd/MM"))
+                                Text(
+                                    text = "$startD - $endD",
+                                    color = colors.textSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = onNextWeek,
+                            enabled = currentWeekOffset < 0L,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(if (currentWeekOffset < 0L) colors.surfaceVariant else colors.surfaceVariant.copy(alpha = 0.4f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = "Próxima semana",
+                                tint = if (currentWeekOffset < 0L) colors.textPrimary else colors.textSecondary.copy(alpha = 0.4f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Weekly Totals
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Column {
+                            Text(
+                                text = "Tempo total ativo",
+                                color = colors.textSecondary,
+                                fontSize = 12.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "${activeHours}h ${activeMins}min",
+                                color = colors.textPrimary,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "${totalWeekCalories.toInt()} kcal",
+                                color = colors.textPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "${String.format(Locale.getDefault(), "%.1f", totalWeekDistance)} km total",
+                                color = colors.textSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // 7 Interactive Day Bars
+                    if (weeklyActivity.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(130.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            weeklyActivity.forEachIndexed { idx, day ->
+                                val isSelected = idx == safeIndex
+                                val barHeightRatio = day.intensityScore.coerceIn(0.1f, 1f)
+
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { selectedDayIndex = idx }
+                                        .padding(vertical = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Bottom
+                                ) {
+                                    if (day.totalActiveMinutes > 0) {
+                                        Text(
+                                            text = "${day.totalActiveMinutes}m",
+                                            color = if (isSelected) colors.primary else colors.textSecondary,
+                                            fontSize = 9.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    } else {
+                                        Spacer(modifier = Modifier.height(13.dp))
+                                    }
+
+                                    Spacer(modifier = Modifier.height(4.dp))
+
+                                    Box(
+                                        modifier = Modifier
+                                            .width(if (isSelected) 18.dp else 12.dp)
+                                            .height((130 * barHeightRatio).dp.coerceAtMost(80.dp))
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(
+                                                if (isSelected) colors.primary
+                                                else if (day.hasActivity) colors.chartBarInactive
+                                                else colors.surfaceVariant
+                                            )
+                                    )
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    Text(
+                                        text = day.dayOfWeekLabel,
+                                        color = if (isSelected) colors.primary else colors.textSecondary,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(90.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Nenhuma sessão de treino no Health Connect para esta semana",
+                                color = colors.textSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Details Section for the Selected Day
+        if (selectedDay != null) {
+            item {
+                val formattedDate = selectedDay.date.format(
+                    DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM", Locale("pt", "BR"))
+                )
+
+                Card(
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(containerColor = colors.surface),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, colors.cardBorder, RoundedCornerShape(22.dp))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = formattedDate.replaceFirstChar { it.uppercase() },
+                                    color = colors.textPrimary,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (selectedDay.hasActivity)
+                                        "${selectedDay.exerciseSessions.size} sessão(ões) registrada(s)"
+                                    else
+                                        "Nenhum treino registrado neste dia",
+                                    color = colors.textSecondary,
+                                    fontSize = 12.sp
+                                )
+                            }
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = "${selectedDay.totalActiveMinutes} min",
+                                        color = colors.textPrimary,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "${selectedDay.totalCaloriesKcal.toInt()} kcal",
+                                        color = colors.textSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Real Exercise Sessions List for Selected Day
+            if (selectedDay.exerciseSessions.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "Treinos do dia",
+                        color = colors.textPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
+
+                items(selectedDay.exerciseSessions.size) { sessionIdx ->
+                    val session = selectedDay.exerciseSessions[sessionIdx]
+                    ExerciseSessionCard(session = session)
+                }
+            } else {
+                item {
+                    Card(
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = colors.surface),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, colors.cardBorder, RoundedCornerShape(20.dp))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FitnessCenter,
+                                contentDescription = null,
+                                tint = colors.textSecondary.copy(alpha = 0.5f),
+                                modifier = Modifier.size(36.dp)
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "Nenhum treino neste dia",
+                                color = colors.textPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Os exercícios registrados na sua pulseira ou apps autorizados aparecerão automaticamente aqui via Health Connect.",
+                                color = colors.textSecondary,
+                                fontSize = 12.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                lineHeight = 17.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Inspirational Real Athlete Quote
         item {
             Card(
                 shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Graphite),
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, GlassBorder, RoundedCornerShape(24.dp))
+                    .border(1.dp, colors.cardBorder, RoundedCornerShape(24.dp))
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -300,13 +461,13 @@ fun ExerciseScreen(
                             modifier = Modifier
                                 .size(34.dp)
                                 .clip(CircleShape)
-                                .background(DarkGray),
+                                .background(colors.surfaceVariant),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.FormatQuote,
                                 contentDescription = null,
-                                tint = CrispWhite,
+                                tint = colors.textPrimary,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -315,14 +476,14 @@ fun ExerciseScreen(
 
                         Column {
                             Text(
-                                text = "Usain Bolt",
-                                color = CrispWhite,
+                                text = "Eliud Kipchoge",
+                                color = colors.textPrimary,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Recordista Mundial e 8x Campeão Olímpico",
-                                color = MidGray,
+                                text = "Bicampeão Olímpico & Recordista de Maratona",
+                                color = colors.textSecondary,
                                 fontSize = 11.sp
                             )
                         }
@@ -331,8 +492,8 @@ fun ExerciseScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
-                        text = "\"Eu treinei 4 anos para correr apenas 9 segundos. Não desista se os resultados levarem algum tempo.\"",
-                        color = CrispWhite,
+                        text = "\"Apenas os disciplinados são livres na vida. Se você é indisciplinado, você é escravo de seus humores e paixões.\"",
+                        color = colors.textPrimary,
                         fontSize = 13.sp,
                         fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
                         lineHeight = 19.sp
@@ -341,94 +502,130 @@ fun ExerciseScreen(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = "A consistência nos dias de esforço moderado é o que constrói resistência cardiovascular sólida.",
-                        color = MidGray,
+                        text = "A consistência diária nos pequenos treinos gera a verdadeira transformação na sua capacidade cardiorrespiratória.",
+                        color = colors.textSecondary,
                         fontSize = 12.sp,
                         lineHeight = 17.sp
                     )
                 }
             }
         }
+    }
+}
 
-        // Section Title: Suas Atividades
-        item {
+@Composable
+fun ExerciseSessionCard(session: ExerciseSessionData) {
+    val colors = VitalTheme.colors
+
+    val icon: ImageVector = when {
+        session.typeName.contains("corrida", ignoreCase = true) -> Icons.Default.DirectionsRun
+        session.typeName.contains("ciclismo", ignoreCase = true) || session.typeName.contains("bicicleta", ignoreCase = true) -> Icons.Default.DirectionsBike
+        session.typeName.contains("caminhada", ignoreCase = true) -> Icons.Default.DirectionsWalk
+        session.typeName.contains("natação", ignoreCase = true) -> Icons.Default.Pool
+        else -> Icons.Default.FitnessCenter
+    }
+
+    Card(
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = colors.surface),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, colors.cardBorder, RoundedCornerShape(22.dp))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Suas atividades",
-                    color = CrispWhite,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = "Health Connect",
-                    color = MidGray,
-                    fontSize = 12.sp
-                )
-            }
-        }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(colors.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = colors.textPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
 
-        // Activity List
-        items(workouts.size) { idx ->
-            val w = workouts[idx]
-            Card(
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = Graphite),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, GlassBorder, RoundedCornerShape(22.dp))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(DarkGray),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = w.icon,
-                                contentDescription = null,
-                                tint = CrispWhite,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                    Spacer(modifier = Modifier.width(14.dp))
 
-                        Spacer(modifier = Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            text = session.title,
+                            color = colors.textPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "${session.durationMinutes} min • ${session.typeName}",
+                            color = colors.textSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
 
-                        Column {
+                if (session.caloriesKcal != null) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "${session.caloriesKcal.toInt()} kcal",
+                            color = colors.textPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (session.distanceKm != null && session.distanceKm > 0.05) {
                             Text(
-                                text = w.title,
-                                color = CrispWhite,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = w.subtitle,
-                                color = MidGray,
-                                fontSize = 12.sp
+                                text = "${String.format(Locale.getDefault(), "%.2f", session.distanceKm)} km",
+                                color = colors.textSecondary,
+                                fontSize = 11.sp
                             )
                         }
                     }
+                }
+            }
 
-                    Icon(
-                        imageVector = Icons.Default.ChevronRight,
-                        contentDescription = null,
-                        tint = MidGray,
-                        modifier = Modifier.size(18.dp)
+            // Additional details row: Heart rate & source
+            if (session.avgHeartRateBpm != null || session.sourceApp.isNotBlank()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Divider(color = colors.cardBorder)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (session.avgHeartRateBpm != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Favorite,
+                                contentDescription = null,
+                                tint = colors.textSecondary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Média: ${session.avgHeartRateBpm} bpm" +
+                                        (if (session.maxHeartRateBpm != null) " (Máx: ${session.maxHeartRateBpm})" else ""),
+                                color = colors.textSecondary,
+                                fontSize = 11.sp
+                            )
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.width(1.dp))
+                    }
+
+                    Text(
+                        text = "Origem: ${session.sourceApp}",
+                        color = colors.textSecondary,
+                        fontSize = 10.sp
                     )
                 }
             }

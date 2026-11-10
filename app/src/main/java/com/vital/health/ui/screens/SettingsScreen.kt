@@ -32,6 +32,9 @@ import com.vital.health.theme.*
 fun SettingsScreen(
     userProfile: UserProfile,
     onUpdateProfile: (UserProfile) -> Unit,
+    currentThemeMode: ThemeMode,
+    currentThemePalette: ThemePalette,
+    onThemeChanged: (ThemeMode, ThemePalette) -> Unit,
     onSyncNow: () -> Unit,
     lastSyncTimeStr: String,
     isSyncing: Boolean,
@@ -39,6 +42,8 @@ fun SettingsScreen(
     onRequestPermissions: () -> Unit
 ) {
     val context = LocalContext.current
+    val colors = VitalTheme.colors
+
     var notificationsEnabled by remember { mutableStateOf(true) }
     var notificationMessage by remember { mutableStateOf<String?>(null) }
 
@@ -50,7 +55,7 @@ fun SettingsScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(DeepBlack)
+            .background(colors.background)
             .padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -69,14 +74,14 @@ fun SettingsScreen(
                         modifier = Modifier
                             .size(42.dp)
                             .clip(CircleShape)
-                            .background(Graphite)
-                            .border(1.dp, GlassBorder, CircleShape),
+                            .background(colors.surface)
+                            .border(1.dp, colors.cardBorder, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.Settings,
                             contentDescription = null,
-                            tint = CrispWhite,
+                            tint = colors.textPrimary,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -86,46 +91,46 @@ fun SettingsScreen(
                     Column {
                         Text(
                             text = "Configurações",
-                            color = CrispWhite,
+                            color = colors.textPrimary,
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "Personalize sua experiência",
-                            color = MidGray,
+                            color = colors.textSecondary,
                             fontSize = 13.sp
                         )
                     }
                 }
 
-                // Botão de Sincronização rápida
+                // Quick sync button
                 IconButton(
                     onClick = onSyncNow,
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
-                        .background(Graphite)
-                        .border(1.dp, GlassBorder, CircleShape)
+                        .background(colors.surface)
+                        .border(1.dp, colors.cardBorder, CircleShape)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Sync,
                         contentDescription = "Sincronizar",
-                        tint = if (isSyncing) Color(0xFF66BB6A) else CrispWhite,
+                        tint = if (isSyncing) colors.primary else colors.textPrimary,
                         modifier = Modifier.size(18.dp)
                     )
                 }
             }
         }
 
-        // Profile Card (Clicável para editar)
+        // Profile Card (Clickable to edit)
         item {
             Card(
                 shape = RoundedCornerShape(26.dp),
-                colors = CardDefaults.cardColors(containerColor = Graphite),
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, GlassBorder, RoundedCornerShape(26.dp))
+                    .border(1.dp, colors.cardBorder, RoundedCornerShape(26.dp))
                     .clickable { showProfileDialog = true }
             ) {
                 Row(
@@ -140,13 +145,13 @@ fun SettingsScreen(
                             modifier = Modifier
                                 .size(50.dp)
                                 .clip(CircleShape)
-                                .background(DarkGray),
+                                .background(colors.surfaceVariant),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Person,
                                 contentDescription = null,
-                                tint = MidGray,
+                                tint = colors.textSecondary,
                                 modifier = Modifier.size(26.dp)
                             )
                         }
@@ -156,19 +161,19 @@ fun SettingsScreen(
                         Column {
                             Text(
                                 text = userProfile.name,
-                                color = CrispWhite,
+                                color = colors.textPrimary,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.height(3.dp))
                             Text(
                                 text = "${userProfile.age} anos • ${(userProfile.heightCm / 100.0).toString().take(4)} m • ${userProfile.weightKg} kg (IMC ${userProfile.bmi})",
-                                color = MidGray,
+                                color = colors.textSecondary,
                                 fontSize = 12.sp
                             )
                             Text(
                                 text = "Toque para editar perfil",
-                                color = MidGray.copy(alpha = 0.7f),
+                                color = colors.textSecondary.copy(alpha = 0.7f),
                                 fontSize = 11.sp,
                                 modifier = Modifier.padding(top = 2.dp)
                             )
@@ -178,9 +183,149 @@ fun SettingsScreen(
                     Icon(
                         imageVector = Icons.Default.ChevronRight,
                         contentDescription = null,
-                        tint = MidGray,
+                        tint = colors.textSecondary,
                         modifier = Modifier.size(18.dp)
                     )
+                }
+            }
+        }
+
+        // Section: Aparência & Temas
+        item {
+            Card(
+                shape = RoundedCornerShape(26.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, colors.cardBorder, RoundedCornerShape(26.dp))
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(colors.surfaceVariant),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Palette,
+                                contentDescription = null,
+                                tint = colors.textPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Aparência & Cores",
+                                color = colors.textPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Tema claro/escuro e paleta de destaque",
+                                color = colors.textSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Mode selector (Sistema, Escuro, Claro)
+                    Text(
+                        text = "Modo de exibição",
+                        color = colors.textSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ThemeMode.values().forEach { mode ->
+                            val isSelected = mode == currentThemeMode
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isSelected) colors.primary else colors.surfaceVariant)
+                                    .clickable { onThemeChanged(mode, currentThemePalette) }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = mode.label,
+                                    color = if (isSelected) colors.onPrimary else colors.textPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Palette selector
+                    Text(
+                        text = "Paleta de cores",
+                        color = colors.textSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ThemePalette.values().forEach { pal ->
+                            val isSelected = pal == currentThemePalette
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isSelected) colors.surfaceVariant else Color.Transparent)
+                                    .border(
+                                        width = if (isSelected) 1.dp else 0.dp,
+                                        color = if (isSelected) colors.primary.copy(alpha = 0.5f) else Color.Transparent,
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    .clickable { onThemeChanged(currentThemeMode, pal) }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .clip(CircleShape)
+                                            .background(pal.previewColor)
+                                            .border(1.dp, colors.cardBorder, CircleShape)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = pal.label,
+                                        color = colors.textPrimary,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selecionado",
+                                        tint = colors.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -189,10 +334,10 @@ fun SettingsScreen(
         item {
             Card(
                 shape = RoundedCornerShape(26.dp),
-                colors = CardDefaults.cardColors(containerColor = Graphite),
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, GlassBorder, RoundedCornerShape(26.dp))
+                    .border(1.dp, colors.cardBorder, RoundedCornerShape(26.dp))
             ) {
                 Column(modifier = Modifier.padding(8.dp)) {
                     // 1. Metas
@@ -203,7 +348,7 @@ fun SettingsScreen(
                         onClick = { showGoalsDialog = true }
                     )
 
-                    Divider(color = GlassBorder, modifier = Modifier.padding(horizontal = 8.dp))
+                    Divider(color = colors.cardBorder, modifier = Modifier.padding(horizontal = 8.dp))
 
                     // 2. Dispositivos Conectados
                     SettingsRowItem(
@@ -213,7 +358,7 @@ fun SettingsScreen(
                         onClick = { showDevicesDialog = true }
                     )
 
-                    Divider(color = GlassBorder, modifier = Modifier.padding(horizontal = 8.dp))
+                    Divider(color = colors.cardBorder, modifier = Modifier.padding(horizontal = 8.dp))
 
                     // 3. Rever Tutorial
                     SettingsRowItem(
@@ -223,7 +368,7 @@ fun SettingsScreen(
                         onClick = onReplayTutorial
                     )
 
-                    Divider(color = GlassBorder, modifier = Modifier.padding(horizontal = 8.dp))
+                    Divider(color = colors.cardBorder, modifier = Modifier.padding(horizontal = 8.dp))
 
                     // 4. Permissões Health Connect
                     SettingsRowItem(
@@ -240,10 +385,10 @@ fun SettingsScreen(
         item {
             Card(
                 shape = RoundedCornerShape(26.dp),
-                colors = CardDefaults.cardColors(containerColor = Graphite),
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, GlassBorder, RoundedCornerShape(26.dp))
+                    .border(1.dp, colors.cardBorder, RoundedCornerShape(26.dp))
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
                     Row(
@@ -256,13 +401,13 @@ fun SettingsScreen(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .clip(CircleShape)
-                                    .background(DarkGray),
+                                    .background(colors.surfaceVariant),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.NotificationsActive,
                                     contentDescription = null,
-                                    tint = CrispWhite,
+                                    tint = colors.textPrimary,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -270,13 +415,13 @@ fun SettingsScreen(
                             Column {
                                 Text(
                                     text = "Notificações & Citações",
-                                    color = CrispWhite,
+                                    color = colors.textPrimary,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
                                     text = "Incentivos de pessoas reais",
-                                    color = MidGray,
+                                    color = colors.textSecondary,
                                     fontSize = 12.sp
                                 )
                             }
@@ -292,10 +437,10 @@ fun SettingsScreen(
                                 }
                             },
                             colors = SwitchDefaults.colors(
-                                checkedThumbColor = DeepBlack,
-                                checkedTrackColor = CrispWhite,
-                                uncheckedThumbColor = MidGray,
-                                uncheckedTrackColor = DarkGray
+                                checkedThumbColor = colors.background,
+                                checkedTrackColor = colors.primary,
+                                uncheckedThumbColor = colors.textSecondary,
+                                uncheckedTrackColor = colors.surfaceVariant
                             )
                         )
                     }
@@ -304,7 +449,7 @@ fun SettingsScreen(
 
                     Text(
                         text = "Envia mensagens com frases reais de Ayrton Senna, Muhammad Ali, Kobe Bryant, Marco Aurélio e Usain Bolt para te manter focado no seu progresso.",
-                        color = MidGray,
+                        color = colors.textSecondary,
                         fontSize = 12.sp,
                         lineHeight = 17.sp
                     )
@@ -318,8 +463,8 @@ fun SettingsScreen(
                             notificationMessage = "Notificação com citação enviada ao sistema!"
                         },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = DarkGray,
-                            contentColor = CrispWhite
+                            containerColor = colors.surfaceVariant,
+                            contentColor = colors.textPrimary
                         ),
                         shape = RoundedCornerShape(20.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -337,7 +482,7 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = notificationMessage ?: "",
-                            color = CrispWhite,
+                            color = colors.textPrimary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -350,10 +495,10 @@ fun SettingsScreen(
         item {
             Card(
                 shape = RoundedCornerShape(26.dp),
-                colors = CardDefaults.cardColors(containerColor = Graphite),
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, GlassBorder, RoundedCornerShape(26.dp))
+                    .border(1.dp, colors.cardBorder, RoundedCornerShape(26.dp))
             ) {
                 Column(modifier = Modifier.padding(18.dp)) {
                     Row(
@@ -366,13 +511,13 @@ fun SettingsScreen(
                                 modifier = Modifier
                                     .size(40.dp)
                                     .clip(CircleShape)
-                                    .background(DarkGray),
+                                    .background(colors.surfaceVariant),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Info,
                                     contentDescription = null,
-                                    tint = CrispWhite,
+                                    tint = colors.textPrimary,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -380,13 +525,13 @@ fun SettingsScreen(
                             Column {
                                 Text(
                                     text = "Sobre o VITAL",
-                                    color = CrispWhite,
+                                    color = colors.textPrimary,
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "Versão 1.0.0 • Visualizador Nativo",
-                                    color = MidGray,
+                                    text = "Versão 1.1.0 • Visualizador Nativo",
+                                    color = colors.textSecondary,
                                     fontSize = 12.sp
                                 )
                             }
@@ -397,7 +542,7 @@ fun SettingsScreen(
 
                     Text(
                         text = "VITAL é um visualizador de saúde sóbrio e minimalista integrado diretamente com o Android Health Connect, Zepp OS e Room Local.",
-                        color = MidGray,
+                        color = colors.textSecondary,
                         fontSize = 12.sp,
                         lineHeight = 17.sp
                     )
@@ -414,8 +559,8 @@ fun SettingsScreen(
                             context.startActivity(intent)
                         },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = CrispWhite,
-                            contentColor = DeepBlack
+                            containerColor = colors.primary,
+                            contentColor = colors.onPrimary
                         ),
                         shape = RoundedCornerShape(22.dp),
                         modifier = Modifier
@@ -439,7 +584,7 @@ fun SettingsScreen(
 
                     Text(
                         text = "github.com/Jacquesdemol/Vitality",
-                        color = MidGray,
+                        color = colors.textSecondary,
                         fontSize = 11.sp,
                         modifier = Modifier.align(Alignment.CenterHorizontally)
                     )
@@ -457,9 +602,9 @@ fun SettingsScreen(
 
         AlertDialog(
             onDismissRequest = { showProfileDialog = false },
-            containerColor = Graphite,
+            containerColor = colors.surface,
             title = {
-                Text("Editar Perfil", color = CrispWhite, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("Editar Perfil", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -469,10 +614,10 @@ fun SettingsScreen(
                         label = { Text("Nome Completo") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = CrispWhite,
-                            unfocusedBorderColor = GlassBorder,
-                            focusedTextColor = CrispWhite,
-                            unfocusedTextColor = CrispWhite
+                            focusedBorderColor = colors.primary,
+                            unfocusedBorderColor = colors.cardBorder,
+                            focusedTextColor = colors.textPrimary,
+                            unfocusedTextColor = colors.textPrimary
                         )
                     )
 
@@ -483,10 +628,10 @@ fun SettingsScreen(
                             label = { Text("Idade (anos)") },
                             modifier = Modifier.weight(1f),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = CrispWhite,
-                                unfocusedBorderColor = GlassBorder,
-                                focusedTextColor = CrispWhite,
-                                unfocusedTextColor = CrispWhite
+                                focusedBorderColor = colors.primary,
+                                unfocusedBorderColor = colors.cardBorder,
+                                focusedTextColor = colors.textPrimary,
+                                unfocusedTextColor = colors.textPrimary
                             )
                         )
 
@@ -496,10 +641,10 @@ fun SettingsScreen(
                             label = { Text("Altura (cm)") },
                             modifier = Modifier.weight(1f),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = CrispWhite,
-                                unfocusedBorderColor = GlassBorder,
-                                focusedTextColor = CrispWhite,
-                                unfocusedTextColor = CrispWhite
+                                focusedBorderColor = colors.primary,
+                                unfocusedBorderColor = colors.cardBorder,
+                                focusedTextColor = colors.textPrimary,
+                                unfocusedTextColor = colors.textPrimary
                             )
                         )
                     }
@@ -510,10 +655,10 @@ fun SettingsScreen(
                         label = { Text("Peso (kg)") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = CrispWhite,
-                            unfocusedBorderColor = GlassBorder,
-                            focusedTextColor = CrispWhite,
-                            unfocusedTextColor = CrispWhite
+                            focusedBorderColor = colors.primary,
+                            unfocusedBorderColor = colors.cardBorder,
+                            focusedTextColor = colors.textPrimary,
+                            unfocusedTextColor = colors.textPrimary
                         )
                     )
                 }
@@ -534,14 +679,14 @@ fun SettingsScreen(
                         onUpdateProfile(updated)
                         showProfileDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = CrispWhite, contentColor = DeepBlack)
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary)
                 ) {
                     Text("Salvar Perfil", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showProfileDialog = false }) {
-                    Text("Cancelar", color = MidGray)
+                    Text("Cancelar", color = colors.textSecondary)
                 }
             }
         )
@@ -556,9 +701,9 @@ fun SettingsScreen(
 
         AlertDialog(
             onDismissRequest = { showGoalsDialog = false },
-            containerColor = Graphite,
+            containerColor = colors.surface,
             title = {
-                Text("Personalizar Metas", color = CrispWhite, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("Personalizar Metas", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -568,10 +713,10 @@ fun SettingsScreen(
                         label = { Text("Meta Diária de Passos") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = CrispWhite,
-                            unfocusedBorderColor = GlassBorder,
-                            focusedTextColor = CrispWhite,
-                            unfocusedTextColor = CrispWhite
+                            focusedBorderColor = colors.primary,
+                            unfocusedBorderColor = colors.cardBorder,
+                            focusedTextColor = colors.textPrimary,
+                            unfocusedTextColor = colors.textPrimary
                         )
                     )
 
@@ -581,10 +726,10 @@ fun SettingsScreen(
                         label = { Text("Meta de Calorias Ativas (kcal)") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = CrispWhite,
-                            unfocusedBorderColor = GlassBorder,
-                            focusedTextColor = CrispWhite,
-                            unfocusedTextColor = CrispWhite
+                            focusedBorderColor = colors.primary,
+                            unfocusedBorderColor = colors.cardBorder,
+                            focusedTextColor = colors.textPrimary,
+                            unfocusedTextColor = colors.textPrimary
                         )
                     )
 
@@ -595,10 +740,10 @@ fun SettingsScreen(
                             label = { Text("Sono (horas)") },
                             modifier = Modifier.weight(1f),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = CrispWhite,
-                                unfocusedBorderColor = GlassBorder,
-                                focusedTextColor = CrispWhite,
-                                unfocusedTextColor = CrispWhite
+                                focusedBorderColor = colors.primary,
+                                unfocusedBorderColor = colors.cardBorder,
+                                focusedTextColor = colors.textPrimary,
+                                unfocusedTextColor = colors.textPrimary
                             )
                         )
 
@@ -608,10 +753,10 @@ fun SettingsScreen(
                             label = { Text("Treinos / semana") },
                             modifier = Modifier.weight(1f),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = CrispWhite,
-                                unfocusedBorderColor = GlassBorder,
-                                focusedTextColor = CrispWhite,
-                                unfocusedTextColor = CrispWhite
+                                focusedBorderColor = colors.primary,
+                                unfocusedBorderColor = colors.cardBorder,
+                                focusedTextColor = colors.textPrimary,
+                                unfocusedTextColor = colors.textPrimary
                             )
                         )
                     }
@@ -636,14 +781,14 @@ fun SettingsScreen(
                         onUpdateProfile(updated)
                         showGoalsDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = CrispWhite, contentColor = DeepBlack)
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary)
                 ) {
                     Text("Salvar Metas", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showGoalsDialog = false }) {
-                    Text("Cancelar", color = MidGray)
+                    Text("Cancelar", color = colors.textSecondary)
                 }
             }
         )
@@ -653,15 +798,15 @@ fun SettingsScreen(
     if (showDevicesDialog) {
         AlertDialog(
             onDismissRequest = { showDevicesDialog = false },
-            containerColor = Graphite,
+            containerColor = colors.surface,
             title = {
-                Text("Dispositivos Conectados", color = CrispWhite, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("Dispositivos Conectados", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     // Item Health Connect
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = DarkGray),
+                        colors = CardDefaults.cardColors(containerColor = colors.surfaceVariant),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -671,13 +816,13 @@ fun SettingsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Android Health Connect", color = CrispWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("Android Health Connect", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 Text("ATIVO", color = Color(0xFF66BB6A), fontWeight = FontWeight.Bold, fontSize = 10.sp)
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                "Centralizador oficial de saúde do Android. Coleta passos, batimentos, sono e treinos.",
-                                color = MidGray,
+                                "Centralizador oficial de saúde do Android. Coleta passos, batimentos, repouso, sono real e treinos.",
+                                color = colors.textSecondary,
                                 fontSize = 11.sp
                             )
                         }
@@ -685,7 +830,7 @@ fun SettingsScreen(
 
                     // Item Zepp / Amazfit
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = DarkGray),
+                        colors = CardDefaults.cardColors(containerColor = colors.surfaceVariant),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -695,13 +840,13 @@ fun SettingsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Amazfit / Zepp OS", color = CrispWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text("SINCRONIZADO", color = CrispWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                                Text("Amazfit / Zepp OS", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("INTEGRADO", color = colors.primary, fontWeight = FontWeight.Bold, fontSize = 10.sp)
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                "Como sincronizar sua pulseira Amazfit:\n1. Abra o aplicativo Zepp\n2. Vá em Perfil > Adicionar Contas > Health Connect\n3. Ative todas as permissões para o VITAL visualizar tudo automaticamente.",
-                                color = MidGray,
+                                "Como sincronizar sua pulseira Amazfit:\n1. Abra o aplicativo Zepp no seu celular\n2. Vá em Perfil > Adicionar Contas > Health Connect\n3. Conceda todas as permissões para o VITAL visualizar tudo automaticamente sem dados falsos.",
+                                color = colors.textSecondary,
                                 fontSize = 11.sp,
                                 lineHeight = 16.sp
                             )
@@ -713,8 +858,8 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Última sincronização:", color = MidGray, fontSize = 11.sp)
-                        Text(lastSyncTimeStr, color = CrispWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("Última sincronização:", color = colors.textSecondary, fontSize = 11.sp)
+                        Text(lastSyncTimeStr, color = colors.textPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             },
@@ -724,14 +869,14 @@ fun SettingsScreen(
                         onSyncNow()
                         showDevicesDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = CrispWhite, contentColor = DeepBlack)
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary)
                 ) {
                     Text("Sincronizar Agora", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDevicesDialog = false }) {
-                    Text("Fechar", color = MidGray)
+                    Text("Fechar", color = colors.textSecondary)
                 }
             }
         )
@@ -745,6 +890,8 @@ fun SettingsRowItem(
     subtitle: String,
     onClick: () -> Unit
 ) {
+    val colors = VitalTheme.colors
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -759,13 +906,13 @@ fun SettingsRowItem(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(CircleShape)
-                    .background(DarkGray),
+                    .background(colors.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = CrispWhite,
+                    tint = colors.textPrimary,
                     modifier = Modifier.size(18.dp)
                 )
             }
@@ -773,13 +920,13 @@ fun SettingsRowItem(
             Column {
                 Text(
                     text = title,
-                    color = CrispWhite,
+                    color = colors.textPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
                     text = subtitle,
-                    color = MidGray,
+                    color = colors.textSecondary,
                     fontSize = 11.sp
                 )
             }
@@ -788,9 +935,8 @@ fun SettingsRowItem(
         Icon(
             imageVector = Icons.Default.ChevronRight,
             contentDescription = null,
-            tint = MidGray,
+            tint = colors.textSecondary,
             modifier = Modifier.size(18.dp)
         )
     }
 }
-

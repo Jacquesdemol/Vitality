@@ -2,24 +2,74 @@
 
 **Repositório Oficial no GitHub**: [https://github.com/Jacquesdemol/Vitality](https://github.com/Jacquesdemol/Vitality)
 
-**VITAL** é um aplicativo Android nativo desenvolvido em **Kotlin** e **Jetpack Compose** com arquitetura **MVVM**, projetado para monitoramento de saúde, atividade física e bem-estar inspirado na elegância do ecossistema Samsung Health e navegação em ilha flutuante da Galaxy Store.
-
-Possui identidade visual monocromática e minimalista (#090909, #171719, #242428, #85858C, #F2F2F4), integração centralizada com o **Android Health Connect SDK**, sistema de **Notificações Inteligentes e Incentivos** com **WorkManager**, tutorial interativo de onboarding, armazenamento local com **Room** e conector para **Zepp Open Platform** (dispositivos Amazfit).
+**VITAL** é um aplicativo Android nativo desenvolvido em **Kotlin** e **Jetpack Compose** com arquitetura **MVVM**, projetado como um visualizador prático e soberano de saúde física, atividade esportiva e sono sincronizado diretamente com o **Android Health Connect SDK** e dispositivos **Zepp OS / Amazfit**.
 
 ---
 
-## 📂 Estrutura de Arquivos para o GitHub e Android Studio
+## 🚀 Principais Funcionalidades
+
+1. **Health Connect 100% Real (Sem Dados Fictícios)**:
+   - Extração rigorosa de **estágios de sono reais** (`DEEP`, `LIGHT`, `REM`, `AWAKE`) a partir de `SleepSessionRecord.stages`, eliminando quaisquer porcentagens artificiais.
+   - Separação estrita entre **Frequência Cardíaca instantânea** (`HeartRateRecord`) e **Frequência Cardíaca de Repouso** (`RestingHeartRateRecord`).
+   - Leitura real de sessões de treino (`ExerciseSessionRecord`) com paginação resiliente, tipo de atividade traduzido, calorias correlacionadas, distância e zonas de frequência cardíaca.
+   - Sincronização de passos (`StepsRecord`), calorias ativas (`ActiveCaloriesBurnedRecord`) e distância agregada (`DistanceRecord`).
+
+2. **Ofensiva de Atividade (Estilo Duolingo)**:
+   - Contador de dias consecutivos de treino e atividade.
+   - Registro de recorde pessoal de ofensiva (maior sequência dos últimos 30 dias).
+   - Acompanhamento semanal de metas com barra de progresso dinâmica e mensagens personalizadas ("Você treinou 5 dias nesta semana. Imparável!").
+
+3. **Painel Interativo de Atividades (`ExerciseScreen.kt`)**:
+   - Gráfico de barras semanal de 7 dias com navegação entre semanas anteriores e atual (`<` e `>`).
+   - Seleção interativa dia a dia.
+   - Lista detalhada de sessões reais do dia selecionado com duração, calorias, distância, batimentos médios e identificação do app de origem.
+   - Estado vazio limpo e sem placeholders quando não houver treinos no dia.
+
+4. **Painel Interativo de Qualidade do Sono (`SleepScreen.kt`)**:
+   - Gráfico de duração do sono dos 7 dias da semana com navegação por semanas.
+   - Seleção de noites individuais com horários reais de adormecer e acordar.
+   - Comparação instantânea com a média semanal de descanso.
+   - Hipnograma cronológico com estágios biométricos reais e aviso transparente quando o dispositivo registrar apenas o tempo total sem estágios.
+
+5. **Painel de Distância Percorrida**:
+   - Visualizador de 7 dias com total acumulado em quilômetros e média diária.
+   - Indicador de proveniência do Health Connect e sensores de passos.
+
+6. **Sistema Completo de Temas & Personalização ("Aparência & Cores")**:
+   - **Modos de Exibição**: Seguir Sistema, Escuro (*Dark Mode* profundo minimalista) e Claro (*Light Mode* elegante).
+   - **6 Paletas de Cores**:
+     - *Monocromático* (Padrão Galaxy Store: `#090909`, `#171719`, `#242428`, `#85858C`, `#F2F2F4`)
+     - *Azul Oceano*
+     - *Verde Esmeralda*
+     - *Roxo Ametista*
+     - *Laranja Pôr do Sol*
+     - *Material You / Monet* (Cores dinâmicas do Android 12+)
+   - Persistência imediata via `SharedPreferences` sem necessidade de reiniciar o aplicativo.
+
+7. **Citações Motivacionais de Pessoas Reais**:
+   - Frases autênticas e inspiradoras de lendas do esporte e do pensamento: **Ayrton Senna**, **Muhammad Ali**, **Kobe Bryant**, **Usain Bolt**, **Marco Aurélio**, **Eliud Kipchoge**, **Serena Williams**, **Bernardinho** e **Sêneca**.
+   - Integração com o sistema de notificações periódicas do Android via **WorkManager**.
+
+8. **Governança de Perfil e Dispositivos**:
+   - Edição de perfil pessoal (Nome, Idade, Altura, Peso e cálculo em tempo real de IMC).
+   - Personalização de metas de saúde (Passos, Calorias, Horas de sono e Dias de treino).
+   - Guia passo a passo de integração com pulseiras e relógios Amazfit através do app oficial Zepp.
+   - Opção de rever o tutorial de boas-vindas a qualquer momento.
+
+---
+
+## 📂 Estrutura de Arquivos
 
 ```text
 ├── build.gradle.kts                      # Script de build raiz
 ├── settings.gradle.kts                   # Configuração de repositórios e módulos
 ├── gradle.properties                     # Configurações de JVM e AndroidX
-├── AndroidManifest.xml                   # Cópia raiz do manifesto (consultas e permissões)
+├── AndroidManifest.xml                   # Cópia raiz do manifesto
 ├── VitalBottomBar.kt                     # Ilha flutuante estilo Galaxy Store (cópia raiz)
-├── Theme.kt                              # Tema Material 3 monocromático (cópia raiz)
-├── HealthConnectRepository.kt            # Repositório do Health Connect (cópia raiz)
-├── ZeppConnector.kt                      # Integração Zepp Open Platform (cópia raiz)
-├── README.md                             # Documentação e instruções de compilação
+├── Theme.kt                              # Sistema de temas e CompositionLocalProvider (cópia raiz)
+├── HealthConnectRepository.kt            # Repositório oficial do Health Connect (cópia raiz)
+├── ZeppConnector.kt                      # Conector Zepp Open Platform (cópia raiz)
+├── README.md                             # Documentação técnica e arquitetura
 ├── gradle/
 │   └── libs.versions.toml                # Version Catalog das dependências
 └── app/
@@ -28,34 +78,44 @@ Possui identidade visual monocromática e minimalista (#090909, #171719, #242428
         └── main/
             ├── AndroidManifest.xml       # Manifesto Android com 14 permissões de saúde
             ├── res/
+            │   ├── mipmap-*/             # Ícones do app (ic_launcher e ic_launcher_round)
             │   └── values/
             │       ├── strings.xml
-            │       └── colors.xml
+            │       └── themes.xml        # Theme.VITAL compatível com Compose
             └── java/com/vital/health/
                 ├── VitalApplication.kt   # Inicialização do app
-                ├── MainActivity.kt       # Activity principal com navegação Compose
+                ├── MainActivity.kt       # Activity principal com suporte a temas e estados
+                ├── model/
+                │   └── HealthModels.kt   # Modelos de domínio (SleepStage, Streak, Activity)
                 ├── theme/
-                │   ├── Color.kt          # Paleta monocromática oficial
-                │   ├── Theme.kt          # Material 3 Dark Theme
-                │   └── Type.kt           # Tipografia moderna e legível
+                │   ├── Color.kt          # Tokens de cores primárias
+                │   ├── Theme.kt          # Material 3 ColorScheme builder
+                │   ├── VitalThemeSystem.kt # Modos, paletas e ThemePreferencesManager
+                │   └── Type.kt           # Tipografia moderna
                 ├── ui/
                 │   ├── components/
                 │   │   └── VitalBottomBar.kt # Navegação inferior em pílula
                 │   └── screens/
-                │       ├── HomeScreen.kt     # Tela Início com widgets personalizáveis
-                │       ├── SleepScreen.kt    # Tela Sono com hipnograma horizontal
-                │       ├── ExerciseScreen.kt # Tela Exercícios com zonas de FC
-                │       └── SettingsScreen.kt # Tela Configurações e governança
+                │       ├── HomeScreen.kt     # Início com Ofensiva, Batimentos, Calorias e Passos
+                │       ├── SleepScreen.kt    # Painel interativo de sono e hipnograma
+                │       ├── ExerciseScreen.kt # Painel interativo de atividades com navegação semanal
+                │       ├── SettingsScreen.kt # Configurações, temas, perfil e metas
+                │       └── TutorialScreen.kt # Onboarding em 3 passos
                 ├── healthconnect/
-                │   └── HealthConnectRepository.kt # Camada do Health Connect SDK
+                │   └── HealthConnectRepository.kt # Leitura de dados biométricos reais
                 ├── zepp/
-                │   └── ZeppConnector.kt      # Conector modular Zepp Open Platform
+                │   └── ZeppConnector.kt      # Conector modular Amazfit
+                ├── notifications/
+                │   └── VitalNotificationHelper.kt # Notificações com citações reais
                 ├── insights/
-                │   └── DailyInsightEngine.kt # Motor de recomendações determinísticas
-                └── data/local/
-                    ├── VitalDatabase.kt      # Banco de dados local Room
-                    ├── HealthDao.kt          # DAO de consultas e inserções
-                    └── HealthEntity.kt       # Entidades Room para cache off-line
+                │   └── DailyInsightEngine.kt # Motor de insights e citações
+                └── data/
+                    ├── UserProfile.kt        # Modelo de perfil e metas
+                    ├── UserProfileManager.kt # Gerenciador de persistência do perfil
+                    └── local/
+                        ├── VitalDatabase.kt  # Banco de dados local Room
+                        ├── HealthDao.kt      # DAO de consultas
+                        └── HealthEntity.kt   # Entidade Room para cache off-line
 ```
 
 ---
@@ -68,7 +128,6 @@ Possui identidade visual monocromática e minimalista (#090909, #171719, #242428
 - **Banco de Dados Local**: Android Room 2.6.1 com KSP
 - **Tarefas em Segundo Plano**: Android WorkManager 2.10.0
 - **Concorrência**: Kotlin Coroutines 1.9.0 e StateFlow
-- **Navegação**: Navigation Compose 2.8.4
 - **Versão Mínima do Android**: Android 9.0 (API 28+)
 
 ---
@@ -76,15 +135,15 @@ Possui identidade visual monocromática e minimalista (#090909, #171719, #242428
 ## 🚀 Como Compilar o APK no Android Studio
 
 ### Pré-requisitos
-- **Android Studio Ladybug (2024.2+)** ou Koala / Iguana instalado.
+- **Android Studio Ladybug (2024.2+)** ou superior instalado.
 - **JDK 17** configurado no Android Studio (*Settings > Build, Execution, Deployment > Build Tools > Gradle > Gradle JDK*).
 - Dispositivo físico com Android 9+ ou emulador com a imagem **Google Play System Image** (com o app **Health Connect** instalado via Google Play ou pré-instalado a partir do Android 14).
 
 ### Passo a Passo
-1. Clone ou baixe este repositório no seu computador:
+1. Clone este repositório no seu computador:
    ```bash
-   git clone <URL_DO_SEU_REPOSITORIO>
-   cd VITAL
+   git clone https://github.com/Jacquesdemol/Vitality.git
+   cd Vitality
    ```
 2. Abra o **Android Studio**.
 3. Selecione **File > Open...** e escolha a pasta raiz do projeto.
@@ -98,75 +157,11 @@ Possui identidade visual monocromática e minimalista (#090909, #171719, #242428
 
 ## ⚙️ Compilação Automática no GitHub Actions (CI/CD)
 
-Para gerar o APK automaticamente a cada commit no seu repositório GitHub, crie o arquivo `.github/workflows/android.yml`:
-
-```yaml
-name: Build Android APK
-
-on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: gradle
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew || true
-
-      - name: Build Debug APK with Gradle
-        run: ./gradlew assembleDebug --stacktrace
-
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: vital-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-```
-
----
-
-## 🔒 Permissões do Android Health Connect
-
-O aplicativo declara e gerencia de forma granular 14 tipos de registros de saúde no `AndroidManifest.xml`:
-
-1. `StepsRecord` (Passos)
-2. `HeartRateRecord` (Frequência Cardíaca contínua)
-3. `RestingHeartRateRecord` (Batimentos em repouso)
-4. `SleepSessionRecord` (Sessões e estágios de sono)
-5. `ExerciseSessionRecord` (Sessões de treino)
-6. `ActiveCaloriesBurnedRecord` (Calorias ativas)
-7. `TotalCaloriesBurnedRecord` (Calorias totais)
-8. `DistanceRecord` (Distância percorrida)
-9. `WeightRecord` (Peso corporal)
-10. `BodyFatRecord` (Gordura corporal por bioimpedância)
-11. `OxygenSaturationRecord` (Saturação SpO2)
-12. `RespiratoryRateRecord` (Frequência respiratória)
-13. `HeartRateVariabilityRmssdRecord` (Variabilidade cardíaca - HRV)
-14. `BloodPressureRecord` (Pressão arterial)
-
----
-
-## ⌚ Integração com Dispositivos Zepp / Amazfit
-
-A classe `ZeppConnector` implementa a arquitetura modular recomendada para a **Zepp Open Platform oficial**:
-- A autenticação OAuth 2.0 e credenciais secretas residem exclusivamente em backend seguro (nunca no APK).
-- Enquanto a integração direta não for autenticada via backend corporativo, o aplicativo utiliza os dados que o app oficial Zepp sincroniza com o **Android Health Connect**, garantindo privacidade absoluta e disponibilidade off-line.
+O repositório já inclui o workflow `.github/workflows/android.yml` configurado para gerar e disponibilizar o arquivo `vital-debug-apk` nos artefatos da aba *Actions* a cada commit.
 
 ---
 
 ## 🛡️ Privacidade e Soberania de Dados
 
 - **100% On-Device**: Todos os dados consultados são persistidos exclusivamente no SQLite/Room local do dispositivo Android.
-- **Não Diagnóstico**: O `DailyInsightEngine` produz apenas contextualizações baseadas em hábitos individuais e regularidade, sem realizar diagnósticos médicos nem prescrever medicamentos.
+- **Zero Venda de Dados**: O aplicativo não envia métricas para servidores de terceiros ou nuvens privadas.

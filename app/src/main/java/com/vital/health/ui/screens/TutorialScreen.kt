@@ -1,6 +1,5 @@
 package com.vital.health.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,7 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vital.health.data.UserGoals
 import com.vital.health.data.UserProfile
-import com.vital.health.theme.*
+import com.vital.health.theme.VitalTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,6 +32,8 @@ fun TutorialScreen(
     onCompleteTutorial: (UserProfile) -> Unit,
     onTestNotification: () -> Unit
 ) {
+    val colors = VitalTheme.colors
+
     var currentStep by remember { mutableIntStateOf(0) }
 
     // User profile inputs for Step 2
@@ -47,7 +48,7 @@ fun TutorialScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(DeepBlack)
+            .background(colors.background)
             .padding(horizontal = 20.dp, vertical = 24.dp)
     ) {
         Column(
@@ -75,7 +76,7 @@ fun TutorialScreen(
                                 .height(4.dp)
                                 .width(if (active) 32.dp else 14.dp)
                                 .clip(CircleShape)
-                                .background(if (active) CrispWhite else DarkGray)
+                                .background(if (active) colors.primary else colors.surfaceVariant)
                         )
                     }
                 }
@@ -86,7 +87,7 @@ fun TutorialScreen(
                         1 -> "Passo 2 de 3 • Seu Perfil Pessoal"
                         else -> "Passo 3 de 3 • Conexão & Notificações"
                     },
-                    color = MidGray,
+                    color = colors.textSecondary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -106,14 +107,14 @@ fun TutorialScreen(
                             modifier = Modifier
                                 .size(96.dp)
                                 .clip(CircleShape)
-                                .background(Graphite)
-                                .border(1.dp, GlassBorder, CircleShape),
+                                .background(colors.surface)
+                                .border(1.dp, colors.cardBorder, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Favorite,
                                 contentDescription = null,
-                                tint = CrispWhite,
+                                tint = colors.primary,
                                 modifier = Modifier.size(44.dp)
                             )
                         }
@@ -123,12 +124,12 @@ fun TutorialScreen(
                         Box(
                             modifier = Modifier
                                 .clip(CircleShape)
-                                .background(DarkGray)
+                                .background(colors.surfaceVariant)
                                 .padding(horizontal = 14.dp, vertical = 6.dp)
                         ) {
                             Text(
                                 text = "Visualizador Oficial de Saúde",
-                                color = MidGray,
+                                color = colors.textSecondary,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -138,7 +139,7 @@ fun TutorialScreen(
 
                         Text(
                             text = "Bem-vindo ao VITAL",
-                            color = CrispWhite,
+                            color = colors.textPrimary,
                             fontSize = 26.sp,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center
@@ -148,7 +149,7 @@ fun TutorialScreen(
 
                         Text(
                             text = "Um painel visualizador elegante, sóbrio e minimalista que sincroniza dados reais do Android Health Connect e relógios Zepp OS / Amazfit.",
-                            color = MidGray,
+                            color = colors.textSecondary,
                             fontSize = 14.sp,
                             lineHeight = 22.sp,
                             textAlign = TextAlign.Center,
@@ -159,29 +160,29 @@ fun TutorialScreen(
 
                         Card(
                             shape = RoundedCornerShape(22.dp),
-                            colors = CardDefaults.cardColors(containerColor = Graphite),
+                            colors = CardDefaults.cardColors(containerColor = colors.surface),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .border(1.dp, GlassBorder, RoundedCornerShape(22.dp))
+                                .border(1.dp, colors.cardBorder, RoundedCornerShape(22.dp))
                         ) {
                             Column(
                                 modifier = Modifier.padding(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Check, contentDescription = null, tint = CrispWhite, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Leitura direta do Android Health Connect", color = CrispWhite, fontSize = 12.sp)
+                                    Text("Leitura direta do Android Health Connect", color = colors.textPrimary, fontSize = 12.sp)
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Check, contentDescription = null, tint = CrispWhite, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(10.dp))
-                                    Text("100% de privacidade e dados locais no seu aparelho", color = CrispWhite, fontSize = 12.sp)
+                                    Text("100% de privacidade e dados locais no seu aparelho", color = colors.textPrimary, fontSize = 12.sp)
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Check, contentDescription = null, tint = CrispWhite, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Citações motivacionais reais de lendas do esporte", color = CrispWhite, fontSize = 12.sp)
+                                    Text("Citações motivacionais reais de lendas do esporte", color = colors.textPrimary, fontSize = 12.sp)
                                 }
                             }
                         }
@@ -198,7 +199,7 @@ fun TutorialScreen(
                     ) {
                         Text(
                             text = "Crie seu Perfil",
-                            color = CrispWhite,
+                            color = colors.textPrimary,
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -207,7 +208,7 @@ fun TutorialScreen(
 
                         Text(
                             text = "Esses dados são usados para calcular seu IMC e personalizar suas metas.",
-                            color = MidGray,
+                            color = colors.textSecondary,
                             fontSize = 13.sp,
                             textAlign = TextAlign.Center
                         )
@@ -222,12 +223,12 @@ fun TutorialScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(16.dp),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = CrispWhite,
-                                unfocusedBorderColor = GlassBorder,
-                                focusedTextColor = CrispWhite,
-                                unfocusedTextColor = CrispWhite,
-                                focusedLabelColor = CrispWhite,
-                                unfocusedLabelColor = MidGray
+                                focusedBorderColor = colors.primary,
+                                unfocusedBorderColor = colors.cardBorder,
+                                focusedTextColor = colors.textPrimary,
+                                unfocusedTextColor = colors.textPrimary,
+                                focusedLabelColor = colors.primary,
+                                unfocusedLabelColor = colors.textSecondary
                             ),
                             singleLine = true
                         )
@@ -246,12 +247,12 @@ fun TutorialScreen(
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(16.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = CrispWhite,
-                                    unfocusedBorderColor = GlassBorder,
-                                    focusedTextColor = CrispWhite,
-                                    unfocusedTextColor = CrispWhite,
-                                    focusedLabelColor = CrispWhite,
-                                    unfocusedLabelColor = MidGray
+                                    focusedBorderColor = colors.primary,
+                                    unfocusedBorderColor = colors.cardBorder,
+                                    focusedTextColor = colors.textPrimary,
+                                    unfocusedTextColor = colors.textPrimary,
+                                    focusedLabelColor = colors.primary,
+                                    unfocusedLabelColor = colors.textSecondary
                                 ),
                                 singleLine = true
                             )
@@ -263,12 +264,12 @@ fun TutorialScreen(
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(16.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = CrispWhite,
-                                    unfocusedBorderColor = GlassBorder,
-                                    focusedTextColor = CrispWhite,
-                                    unfocusedTextColor = CrispWhite,
-                                    focusedLabelColor = CrispWhite,
-                                    unfocusedLabelColor = MidGray
+                                    focusedBorderColor = colors.primary,
+                                    unfocusedBorderColor = colors.cardBorder,
+                                    focusedTextColor = colors.textPrimary,
+                                    unfocusedTextColor = colors.textPrimary,
+                                    focusedLabelColor = colors.primary,
+                                    unfocusedLabelColor = colors.textSecondary
                                 ),
                                 singleLine = true
                             )
@@ -288,12 +289,12 @@ fun TutorialScreen(
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(16.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = CrispWhite,
-                                    unfocusedBorderColor = GlassBorder,
-                                    focusedTextColor = CrispWhite,
-                                    unfocusedTextColor = CrispWhite,
-                                    focusedLabelColor = CrispWhite,
-                                    unfocusedLabelColor = MidGray
+                                    focusedBorderColor = colors.primary,
+                                    unfocusedBorderColor = colors.cardBorder,
+                                    focusedTextColor = colors.textPrimary,
+                                    unfocusedTextColor = colors.textPrimary,
+                                    focusedLabelColor = colors.primary,
+                                    unfocusedLabelColor = colors.textSecondary
                                 ),
                                 singleLine = true
                             )
@@ -305,12 +306,12 @@ fun TutorialScreen(
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(16.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = CrispWhite,
-                                    unfocusedBorderColor = GlassBorder,
-                                    focusedTextColor = CrispWhite,
-                                    unfocusedTextColor = CrispWhite,
-                                    focusedLabelColor = CrispWhite,
-                                    unfocusedLabelColor = MidGray
+                                    focusedBorderColor = colors.primary,
+                                    unfocusedBorderColor = colors.cardBorder,
+                                    focusedTextColor = colors.textPrimary,
+                                    unfocusedTextColor = colors.textPrimary,
+                                    focusedLabelColor = colors.primary,
+                                    unfocusedLabelColor = colors.textSecondary
                                 ),
                                 singleLine = true
                             )
@@ -330,14 +331,14 @@ fun TutorialScreen(
                             modifier = Modifier
                                 .size(80.dp)
                                 .clip(CircleShape)
-                                .background(Graphite)
-                                .border(1.dp, GlassBorder, CircleShape),
+                                .background(colors.surface)
+                                .border(1.dp, colors.cardBorder, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.NotificationsActive,
                                 contentDescription = null,
-                                tint = CrispWhite,
+                                tint = colors.primary,
                                 modifier = Modifier.size(38.dp)
                             )
                         }
@@ -346,7 +347,7 @@ fun TutorialScreen(
 
                         Text(
                             text = "Notificações & Health Connect",
-                            color = CrispWhite,
+                            color = colors.textPrimary,
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center
@@ -356,7 +357,7 @@ fun TutorialScreen(
 
                         Text(
                             text = "Autorize o VITAL a ler os dados de saúde do seu telefone e enviar alertas com frases de lendas como Ayrton Senna, Muhammad Ali e Kobe Bryant.",
-                            color = MidGray,
+                            color = colors.textSecondary,
                             fontSize = 13.sp,
                             lineHeight = 20.sp,
                             textAlign = TextAlign.Center
@@ -368,13 +369,13 @@ fun TutorialScreen(
                         Button(
                             onClick = onTestNotification,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Graphite,
-                                contentColor = CrispWhite
+                                containerColor = colors.surface,
+                                contentColor = colors.textPrimary
                             ),
                             shape = RoundedCornerShape(20.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .border(1.dp, GlassBorder, RoundedCornerShape(20.dp))
+                                .border(1.dp, colors.cardBorder, RoundedCornerShape(20.dp))
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Notifications,
@@ -402,8 +403,8 @@ fun TutorialScreen(
                             .fillMaxWidth()
                             .height(52.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = CrispWhite,
-                            contentColor = DeepBlack
+                            containerColor = colors.primary,
+                            contentColor = colors.onPrimary
                         ),
                         shape = RoundedCornerShape(26.dp)
                     ) {
@@ -415,7 +416,7 @@ fun TutorialScreen(
                         TextButton(
                             onClick = { currentStep = 1 }
                         ) {
-                            Text(text = "Pular Introdução", color = MidGray, fontSize = 13.sp)
+                            Text(text = "Pular Introdução", color = colors.textSecondary, fontSize = 13.sp)
                         }
                     }
                 } else {
@@ -441,8 +442,8 @@ fun TutorialScreen(
                             .fillMaxWidth()
                             .height(52.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = CrispWhite,
-                            contentColor = DeepBlack
+                            containerColor = colors.primary,
+                            contentColor = colors.onPrimary
                         ),
                         shape = RoundedCornerShape(26.dp)
                     ) {

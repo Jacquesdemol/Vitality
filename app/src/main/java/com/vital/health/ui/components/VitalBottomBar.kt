@@ -19,10 +19,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.vital.health.theme.*
+import com.vital.health.theme.VitalTheme
 
 enum class VitalTab(val title: String, val icon: ImageVector) {
     SLEEP("Sono", Icons.Default.Bedtime),
@@ -32,7 +33,7 @@ enum class VitalTab(val title: String, val icon: ImageVector) {
 }
 
 /**
- * Ilha flutuante em formato de pílula inspirada na navegação inferior da Galaxy Store
+ * Ilha flutuante em formato de pílula adaptável dinamicamente aos temas claro, escuro e paletas do VITAL
  */
 @Composable
 fun VitalBottomBar(
@@ -40,6 +41,8 @@ fun VitalBottomBar(
     onTabSelected: (VitalTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = VitalTheme.colors
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -51,8 +54,8 @@ fun VitalBottomBar(
                 .widthIn(max = 380.dp)
                 .fillMaxWidth()
                 .clip(CircleShape)
-                .background(GlassBackground)
-                .border(1.dp, GlassBorder, CircleShape)
+                .background(colors.pillBackground)
+                .border(1.dp, colors.cardBorder, CircleShape)
                 .padding(horizontal = 6.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -60,11 +63,11 @@ fun VitalBottomBar(
             VitalTab.values().forEach { tab ->
                 val isSelected = tab == currentTab
                 val tabBg by animateColorAsState(
-                    targetValue = if (isSelected) PillHighlight else androidx.compose.ui.graphics.Color.Transparent,
+                    targetValue = if (isSelected) colors.pillHighlight else Color.Transparent,
                     animationSpec = tween(durationMillis = 200),
                     label = "tab_highlight"
                 )
-                val contentColor = if (isSelected) CrispWhite else MidGray
+                val contentColor = if (isSelected) colors.primary else colors.textSecondary
 
                 Column(
                     modifier = Modifier
@@ -87,7 +90,8 @@ fun VitalBottomBar(
                         text = tab.title,
                         color = contentColor,
                         fontSize = 11.sp,
-                        maxLines = 1
+                        maxLines = 1,
+                        fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.SemiBold else androidx.compose.ui.text.font.FontWeight.Normal
                     )
                 }
             }
