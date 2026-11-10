@@ -29,6 +29,8 @@ export class DailyInsightEngine {
         category: 'activity',
         title: 'Meta de Passos Concluída',
         message: 'Excelente! Você completou sua meta diária de passos planejada.',
+        quote: 'Não conte os dias, faça os dias contarem.',
+        author: 'Muhammad Ali',
         importance: 'medium',
         timestamp: now,
       });
@@ -38,6 +40,8 @@ export class DailyInsightEngine {
         category: 'activity',
         title: 'Próximo da Meta',
         message: 'Você está próximo de alcançar sua meta de passos. Uma caminhada curta pode ajudar.',
+        quote: 'Se você quer ser bem-sucedido, precisa ter dedicação total e buscar seu último limite.',
+        author: 'Ayrton Senna',
         importance: 'high',
         timestamp: now,
       });
@@ -47,6 +51,8 @@ export class DailyInsightEngine {
         category: 'habits',
         title: 'Movimente-se',
         message: 'Você passou boa parte do dia sem registrar atividade. Uma pausa para movimentar o corpo pode ser interessante.',
+        quote: 'Não é porque as coisas são difíceis que não ousamos; é porque não ousamos que elas são difíceis.',
+        author: 'Sêneca',
         importance: 'medium',
         timestamp: now,
       });

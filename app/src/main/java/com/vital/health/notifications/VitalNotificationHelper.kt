@@ -11,6 +11,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.work.*
 import com.vital.health.MainActivity
 import com.vital.health.R
+import com.vital.health.insights.DailyInsightEngine
 import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
@@ -18,7 +19,7 @@ object VitalNotificationHelper {
 
     const val CHANNEL_ID = "vital_health_channel"
     private const val CHANNEL_NAME = "Alertas e Incentivos VITAL"
-    private const val CHANNEL_DESC = "Notificações de metas, alertas de inatividade e dicas diárias"
+    private const val CHANNEL_DESC = "Notificações com citações reais, metas e dicas de saúde"
 
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -68,26 +69,28 @@ object VitalNotificationHelper {
     }
 
     fun sendSampleNotification(context: Context, type: String = "motivation") {
+        val quote = DailyInsightEngine.getRandomQuote()
+
         when (type) {
             "motivation" -> sendHealthAlert(
                 context,
-                "Quase lá na meta diária! 🏃",
-                "Você já completou 7.842 de 10.000 passos hoje (78%). Uma caminhada leve de 15 minutos é o suficiente para fechar sua meta!"
+                "${quote.author} • Inspiração Real ✨",
+                "\"${quote.text}\" — ${quote.role}.\nMantenha a consistência nos seus passos e atividade hoje!"
             )
             "sleep" -> sendHealthAlert(
                 context,
-                "Qualidade de Sono Excelente 🌙",
-                "Você dormiu 7h 48min na última noite, com sono profundo acima da média semanal (+6%). Excelente recuperação!"
+                "Kobe Bryant • Recuperação Inteligente 🌙",
+                "\"A dedicação faz o que o talento apenas promete. O descanso e o esforço caminham juntos.\"\nExcelente noite de descanso para recuperar sua energia!"
             )
             "inactivity" -> sendHealthAlert(
                 context,
-                "Hora de se movimentar! 💧",
-                "Você permaneceu focado por mais de 90 minutos. Que tal levantar, beber água e dar uma caminhada rápida?"
+                "Muhammad Ali • Faça o dia contar 🥊",
+                "\"Não conte os dias, faça os dias contarem.\"\nVocê está em repouso prolongado. Levante-se para beber água e caminhar alguns minutos!"
             )
             else -> sendHealthAlert(
                 context,
-                "VITAL Saúde",
-                "Mantenha a consistência nos treinos e cuide do seu sono para maximizar seu bem-estar diário."
+                "Ayrton Senna • Foco Total 🏁",
+                "\"Se você quer ser bem-sucedido, precisa ter dedicação total, buscar seu último limite e dar o melhor de si.\""
             )
         }
     }

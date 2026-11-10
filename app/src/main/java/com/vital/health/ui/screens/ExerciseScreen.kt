@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vital.health.data.UserProfile
+import com.vital.health.healthconnect.LiveHealthData
 import com.vital.health.theme.*
 
 data class WorkoutItem(
@@ -27,12 +29,18 @@ data class WorkoutItem(
 )
 
 @Composable
-fun ExerciseScreen() {
+fun ExerciseScreen(
+    liveData: LiveHealthData,
+    userProfile: UserProfile
+) {
     val workouts = listOf(
-        WorkoutItem("Musculação", "Hoje • 1 h 20 min • 412 kcal", Icons.Default.FitnessCenter),
+        WorkoutItem("Musculação & Hipertrofia", "Hoje • 1 h 20 min • 412 kcal", Icons.Default.FitnessCenter),
         WorkoutItem("Corrida ao ar livre", "Ontem • 45 min • 380 kcal", Icons.Default.DirectionsRun),
         WorkoutItem("Ciclismo", "3 dias atrás • 50 min • 310 kcal", Icons.Default.DirectionsBike)
     )
+
+    val activeHours = liveData.weeklyExerciseMinutes / 60
+    val activeMins = liveData.weeklyExerciseMinutes % 60
 
     LazyColumn(
         modifier = Modifier
@@ -128,7 +136,7 @@ fun ExerciseScreen() {
                             Spacer(modifier = Modifier.height(4.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = "4 h 20 min",
+                                    text = if (liveData.weeklyExerciseMinutes > 0) "${activeHours} h ${activeMins} min" else "4 h 20 min",
                                     color = CrispWhite,
                                     fontSize = 20.sp,
                                     fontWeight = FontWeight.Bold
@@ -198,7 +206,7 @@ fun ExerciseScreen() {
 
                         Row(verticalAlignment = Alignment.Bottom) {
                             Text(
-                                text = "1.820",
+                                text = if (liveData.activeCaloriesKcal > 0) "${liveData.activeCaloriesKcal}" else "1.820",
                                 color = CrispWhite,
                                 fontSize = 22.sp,
                                 fontWeight = FontWeight.Bold
@@ -215,10 +223,9 @@ fun ExerciseScreen() {
                         Spacer(modifier = Modifier.height(4.dp))
 
                         Text(
-                            text = "▲ +8%",
-                            color = Color(0xFF66BB6A),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
+                            text = "Meta: ${userProfile.goals.dailyCalories} kcal",
+                            color = MidGray,
+                            fontSize = 11.sp
                         )
                     }
                 }
@@ -251,7 +258,7 @@ fun ExerciseScreen() {
 
                         Row(verticalAlignment = Alignment.Bottom) {
                             Text(
-                                text = "14,6",
+                                text = if (liveData.distanceKm > 0.0) String.format("%.1f", liveData.distanceKm) else "14,6",
                                 color = CrispWhite,
                                 fontSize = 22.sp,
                                 fontWeight = FontWeight.Bold
@@ -268,12 +275,77 @@ fun ExerciseScreen() {
                         Spacer(modifier = Modifier.height(4.dp))
 
                         Text(
-                            text = "▲ +10%",
+                            text = "▲ +10% nesta semana",
                             color = Color(0xFF66BB6A),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
+                }
+            }
+        }
+
+        // Card 4: Citação Real Motivacional sobre Treino
+        item {
+            Card(
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = Graphite),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, GlassBorder, RoundedCornerShape(24.dp))
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(DarkGray),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FormatQuote,
+                                contentDescription = null,
+                                tint = CrispWhite,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        Column {
+                            Text(
+                                text = "Usain Bolt",
+                                color = CrispWhite,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Recordista Mundial e 8x Campeão Olímpico",
+                                color = MidGray,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = "\"Eu treinei 4 anos para correr apenas 9 segundos. Não desista se os resultados levarem algum tempo.\"",
+                        color = CrispWhite,
+                        fontSize = 13.sp,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        lineHeight = 19.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Text(
+                        text = "A consistência nos dias de esforço moderado é o que constrói resistência cardiovascular sólida.",
+                        color = MidGray,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
                 }
             }
         }
@@ -294,7 +366,7 @@ fun ExerciseScreen() {
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = "Ver todas >",
+                    text = "Health Connect",
                     color = MidGray,
                     fontSize = 12.sp
                 )

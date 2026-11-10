@@ -23,23 +23,40 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vital.health.data.UserProfile
+import com.vital.health.healthconnect.LiveHealthData
+import com.vital.health.insights.DailyInsightEngine
 import com.vital.health.theme.*
 
 @Composable
 fun HomeScreen(
-    userName: String = "Iury",
-    currentSteps: Long = 7842,
-    targetSteps: Long = 10000,
-    currentBpm: Int = 72,
-    activeCalories: Int = 612,
-    workoutDaysDone: Int = 3,
-    workoutDaysTarget: Int = 5,
-    weightKg: Double = 73.8,
-    bmi: Double = 24.1,
-    bodyFatPct: Double = 20.5,
+    userProfile: UserProfile,
+    liveData: LiveHealthData,
+    isSyncing: Boolean = false,
+    onSync: () -> Unit = {},
     onNavigateToExercise: () -> Unit = {},
     onTriggerHealthTip: () -> Unit = {}
 ) {
+    val currentSteps = liveData.steps
+    val targetSteps = userProfile.goals.dailySteps
+    val currentBpm = liveData.heartRateBpm
+    val activeCalories = liveData.activeCaloriesKcal
+    val workoutDaysDone = liveData.weeklyExerciseDays
+    val workoutDaysTarget = userProfile.goals.weeklyWorkoutDays
+    val weightKg = liveData.weightKg ?: userProfile.weightKg
+    val bmi = userProfile.bmi
+
+    // Generate real motivational insight with real quotes
+    val insights = DailyInsightEngine.generate(
+        currentSteps = currentSteps,
+        stepGoal = targetSteps,
+        sleepMinutes = liveData.sleepDurationMinutes,
+        weeklyAvgSleepMinutes = (userProfile.goals.sleepHours * 60).toLong(),
+        workoutCount = workoutDaysDone,
+        restingHrDelta = 0
+    )
+    val primaryInsight = insights.firstOrNull()
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -59,20 +76,50 @@ fun HomeScreen(
             ) {
                 Column {
                     Text(
-                        text = "Olá, $userName!",
+                        text = "Olá, ${userProfile.name}!",
                         color = CrispWhite,
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "Cuide de você hoje. 🖤",
-                        color = MidGray,
-                        fontSize = 13.sp
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (liveData.isRealHealthConnectData) Color(0xFF66BB6A) else MidGray)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (liveData.isRealHealthConnectData) "Health Connect Sincronizado" else "Health Connect Conectado",
+                            color = MidGray,
+                            fontSize = 12.sp
+                        )
+                    }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Sync button
+                    IconButton(
+                        onClick = onSync,
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Graphite)
+                            .border(1.dp, GlassBorder, CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Sync,
+                            contentDescription = "Sincronizar",
+                            tint = if (isSyncing) Color(0xFF66BB6A) else CrispWhite,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    // Motivational quote trigger
                     IconButton(
                         onClick = onTriggerHealthTip,
                         modifier = Modifier
@@ -82,8 +129,8 @@ fun HomeScreen(
                             .border(1.dp, GlassBorder, CircleShape)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Favorite,
-                            contentDescription = "Alerta",
+                            imageVector = Icons.Default.NotificationsActive,
+                            contentDescription = "Citação",
                             tint = CrispWhite,
                             modifier = Modifier.size(18.dp)
                         )
@@ -116,17 +163,16 @@ fun HomeScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Batimentos",
+                                text = "Batimentos Cardíacos",
                                 color = CrispWhite,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
-                        Icon(
-                            imageVector = Icons.Default.ChevronRight,
-                            contentDescription = null,
-                            tint = MidGray,
-                            modifier = Modifier.size(18.dp)
+                        Text(
+                            text = if (currentBpm != null) "Health Connect" else "Sem leitura recente",
+                            color = MidGray,
+                            fontSize = 11.sp
                         )
                     }
 
@@ -140,7 +186,7 @@ fun HomeScreen(
                         Column {
                             Row(verticalAlignment = Alignment.Bottom) {
                                 Text(
-                                    text = "$currentBpm",
+                                    text = if (currentBpm != null) "$currentBpm" else "--",
                                     color = CrispWhite,
                                     fontSize = 34.sp,
                                     fontWeight = FontWeight.Bold
@@ -154,23 +200,23 @@ fun HomeScreen(
                                 )
                             }
                             Text(
-                                text = "Normal • 52–100 bpm",
+                                text = if (currentBpm != null) "Normal • 52–100 bpm" else "Sincronize a pulseira Zepp / Amazfit",
                                 color = MidGray,
                                 fontSize = 12.sp
                             )
                         }
 
                         // Sparkline minimalist Canvas
-                        Canvas(modifier = Modifier.size(width = 140.dp, height = 45.dp)) {
+                        Canvas(modifier = Modifier.size(width = 130.dp, height = 40.dp)) {
                             val path = Path()
                             val points = listOf(
-                                Offset(0f, 30f),
-                                Offset(25f, 28f),
-                                Offset(50f, 15f),
-                                Offset(75f, 35f),
-                                Offset(100f, 8f),
-                                Offset(125f, 22f),
-                                Offset(140f, 16f)
+                                Offset(0f, 26f),
+                                Offset(22f, 24f),
+                                Offset(44f, 12f),
+                                Offset(66f, 30f),
+                                Offset(88f, 6f),
+                                Offset(110f, 18f),
+                                Offset(130f, 14f)
                             )
                             points.forEachIndexed { i, p ->
                                 if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
@@ -215,7 +261,7 @@ fun HomeScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Calorias",
+                                text = "Calorias Ativas",
                                 color = MidGray,
                                 fontSize = 12.sp
                             )
@@ -239,13 +285,20 @@ fun HomeScreen(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Meta: ${userProfile.goals.dailyCalories} kcal",
+                            color = MidGray,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         // Mini Bar graph
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(26.dp),
+                                .height(22.dp),
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.Bottom
                         ) {
@@ -280,7 +333,7 @@ fun HomeScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Passos",
+                                text = "Passos Hoje",
                                 color = MidGray,
                                 fontSize = 12.sp
                             )
@@ -446,7 +499,12 @@ fun HomeScreen(
                             }
                             Row {
                                 Text(text = "Gordura: ", color = MidGray, fontSize = 13.sp)
-                                Text(text = "$bodyFatPct%", color = CrispWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = if (liveData.bodyFatPct != null) "${liveData.bodyFatPct}%" else "Bioimpedância",
+                                    color = CrispWhite,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
 
@@ -474,7 +532,7 @@ fun HomeScreen(
             }
         }
 
-        // Widget 6: Dica Diária / Insight
+        // Widget 6: Citação Real Inspiradora & Insight do Dia
         item {
             Card(
                 shape = RoundedCornerShape(24.dp),
@@ -483,42 +541,61 @@ fun HomeScreen(
                     .fillMaxWidth()
                     .border(1.dp, GlassBorder, RoundedCornerShape(24.dp))
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(DarkGray),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Lightbulb,
-                            contentDescription = null,
-                            tint = CrispWhite,
-                            modifier = Modifier.size(18.dp)
-                        )
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(DarkGray),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FormatQuote,
+                                contentDescription = null,
+                                tint = CrispWhite,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        Column {
+                            Text(
+                                text = primaryInsight?.title ?: "Inspiração do Dia",
+                                color = CrispWhite,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (primaryInsight?.author != null) {
+                                Text(
+                                    text = primaryInsight.author,
+                                    color = MidGray,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
                     }
 
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    Column {
+                    if (primaryInsight?.quote != null) {
+                        Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = "Dica de hoje",
+                            text = "\"${primaryInsight.quote}\"",
                             color = CrispWhite,
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Você está a apenas 2.158 passos de bater sua meta diária. Uma caminhada de 20 minutos fecha o dia com sucesso!",
-                            color = MidGray,
-                            fontSize = 12.sp,
-                            lineHeight = 18.sp
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                            lineHeight = 19.sp
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = primaryInsight?.message ?: "Mantenha o foco e a consistência no seu ritmo de atividade hoje.",
+                        color = MidGray,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
                 }
             }
         }

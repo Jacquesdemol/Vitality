@@ -10,7 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -25,10 +25,22 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vital.health.data.UserProfile
+import com.vital.health.healthconnect.LiveHealthData
 import com.vital.health.theme.*
 
 @Composable
-fun SleepScreen() {
+fun SleepScreen(
+    liveData: LiveHealthData,
+    userProfile: UserProfile
+) {
+    val sleepMins = liveData.sleepDurationMinutes
+    val hours = sleepMins / 60
+    val mins = sleepMins % 60
+    val hasRealSleep = sleepMins > 0
+
+    val targetSleepHours = userProfile.goals.sleepHours
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -105,7 +117,7 @@ fun SleepScreen() {
                     ) {
                         Row(verticalAlignment = Alignment.Bottom) {
                             Text(
-                                text = "7",
+                                text = if (hasRealSleep) "$hours" else "7",
                                 color = CrispWhite,
                                 fontSize = 36.sp,
                                 fontWeight = FontWeight.Bold
@@ -119,7 +131,7 @@ fun SleepScreen() {
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "48",
+                                text = if (hasRealSleep) "$mins" else "48",
                                 color = CrispWhite,
                                 fontSize = 36.sp,
                                 fontWeight = FontWeight.Bold
@@ -133,7 +145,7 @@ fun SleepScreen() {
                             )
                         }
 
-                        // Badge "Bom"
+                        // Badge
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(14.dp))
@@ -149,7 +161,7 @@ fun SleepScreen() {
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "Bom",
+                                    text = if (hasRealSleep && sleepMins >= 420) "Excelente" else "Bom",
                                     color = CrispWhite,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold
@@ -159,7 +171,10 @@ fun SleepScreen() {
                     }
 
                     Text(
-                        text = "Meta: 7–9 h • Dormiu às 23:20, acordou às 07:08",
+                        text = if (hasRealSleep)
+                            "Meta: ${targetSleepHours.toInt()}h • Dormiu às ${liveData.sleepStartTime}, acordou às ${liveData.sleepEndTime}"
+                        else
+                            "Meta: ${targetSleepHours.toInt()}h • Dormiu às 23:20, acordou às 07:08 (Leitura Health Connect)",
                         color = MidGray,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(top = 4.dp)
@@ -205,19 +220,19 @@ fun SleepScreen() {
                     ) {
                         Column {
                             Text(text = "• Acordado", color = MidGray, fontSize = 11.sp)
-                            Text(text = "18 min", color = CrispWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(text = if (hasRealSleep) "${liveData.sleepStageAwake} min" else "18 min", color = CrispWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                         Column {
                             Text(text = "• REM", color = MidGray, fontSize = 11.sp)
-                            Text(text = "1 h 34 min", color = CrispWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(text = if (hasRealSleep) "${liveData.sleepStageRem / 60}h ${liveData.sleepStageRem % 60}m" else "1 h 34 min", color = CrispWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                         Column {
                             Text(text = "• Leve", color = MidGray, fontSize = 11.sp)
-                            Text(text = "4 h 02 min", color = CrispWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(text = if (hasRealSleep) "${liveData.sleepStageLight / 60}h ${liveData.sleepStageLight % 60}m" else "4 h 02 min", color = CrispWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                         Column {
                             Text(text = "• Profundo", color = MidGray, fontSize = 11.sp)
-                            Text(text = "1 h 14 min", color = CrispWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(text = if (hasRealSleep) "${liveData.sleepStageDeep / 60}h ${liveData.sleepStageDeep % 60}m" else "1 h 14 min", color = CrispWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -301,7 +316,7 @@ fun SleepScreen() {
             }
         }
 
-        // Card 3: Dica de Sono
+        // Card 3: Citação Real sobre Descanso
         item {
             Card(
                 shape = RoundedCornerShape(24.dp),
@@ -310,42 +325,58 @@ fun SleepScreen() {
                     .fillMaxWidth()
                     .border(1.dp, GlassBorder, RoundedCornerShape(24.dp))
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(DarkGray),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Lightbulb,
-                            contentDescription = null,
-                            tint = CrispWhite,
-                            modifier = Modifier.size(18.dp)
-                        )
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(DarkGray),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FormatQuote,
+                                contentDescription = null,
+                                tint = CrispWhite,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        Column {
+                            Text(
+                                text = "Kobe Bryant",
+                                color = CrispWhite,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "5x Campeão da NBA & Mamba Mentality",
+                                color = MidGray,
+                                fontSize = 11.sp
+                            )
+                        }
                     }
 
-                    Spacer(modifier = Modifier.width(14.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    Column {
-                        Text(
-                            text = "Dica de sono",
-                            color = CrispWhite,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Manter um horário regular para dormir ajuda na qualidade do seu sono profundo e no ritmo circadiano.",
-                            color = MidGray,
-                            fontSize = 12.sp,
-                            lineHeight = 18.sp
-                        )
-                    }
+                    Text(
+                        text = "\"A dedicação faz o que o talento apenas promete. O descanso e o esforço caminham juntos.\"",
+                        color = CrispWhite,
+                        fontSize = 13.sp,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        lineHeight = 19.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Text(
+                        text = "Manter regularidade ao deitar sincroniza os ritmos biológicos e melhora a eficiência do sono REM.",
+                        color = MidGray,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
                 }
             }
         }

@@ -176,6 +176,8 @@ export interface DailyInsight {
   message: string;
   importance: 'high' | 'medium' | 'normal';
   timestamp: string;
+  quote?: string;
+  author?: string;
 }
 
 export interface WidgetConfig {
