@@ -10,21 +10,29 @@ import androidx.health.connect.client.time.TimeRangeFilter
 import com.vital.health.data.local.HealthMetricEntity
 import com.vital.health.data.local.VitalDatabase
 import com.vital.health.model.*
+import com.vital.health.util.AppLifecycleTracker
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
 import java.time.temporal.ChronoUnit
+import java.time.temporal.TemporalAdjusters
+import java.util.Locale
 
 /**
  * HealthConnectRepository - Camada de integração com o Android Health Connect SDK
- * Cumpre os requisitos estritos da auditoria:
- * 1. Não inventa dados fictícios, porcentagens arbitrárias de sono ou exercícios placeholders.
- * 2. Distingue estritamente Frequência Cardíaca de Frequência Cardíaca em Repouso.
- * 3. Extrai intervalos e estágios de sono reais de SleepSessionRecord.stages.
- * 4. Pagina consultas de exercícios e agrega distância e calorias por período.
- * 5. Trata permissões e status do SDK de forma granular.
+ * Cumpre os requisitos estritos da auditoria e correção do ciclo de vida:
+ * 1. Não executa consultas enquanto o aplicativo estiver em segundo plano (evita erro READ_HEALTH_DATA_IN_BACKGROUND).
+ * 2. Em caso de SecurityException (permissão ausente ou negada), aborta imediatamente o loop sem retries infinitos.
+ * 3. Otimiza o cálculo de ofensiva (calculateStreak), eliminando até centenas de agregações desnecessárias.
+ * 4. Instrumentação completa com a tag VITAL_HC_DEBUG contendo ID único, horários, estado do app, registros e exceções.
+ * 5. Reutiliza cache em memória e serializa consultas simultâneas via Mutex.
  */
 class HealthConnectRepository(
     private val context: Context,
@@ -56,6 +64,13 @@ class HealthConnectRepository(
         HealthPermission.getReadPermission(BloodPressureRecord::class)
     )
 
+    private val syncMutex = Mutex()
+
+    @Volatile
+    private var cachedLiveData: LiveHealthData? = null
+    @Volatile
+    private var lastLiveDataFetchTime: Long = 0L
+
     fun getSdkStatus(): HealthSyncStatus {
         return when (HealthConnectClient.getSdkStatus(context)) {
             HealthConnectClient.SDK_AVAILABLE -> HealthSyncStatus.CONNECTED
@@ -70,9 +85,21 @@ class HealthConnectRepository(
 
     suspend fun getGrantedPermissions(): Set<String> {
         val client = healthConnectClient ?: return emptySet()
+        val qId = HealthConnectLogger.nextQueryId("PERM")
+        val coroutineCtx = currentCoroutineContext()
+        val startNs = System.currentTimeMillis()
+
+        HealthConnectLogger.logQueryStart(qId, "PermissionCheck", "Repository", "CHECK_PERMISSIONS", coroutineCtx)
         return try {
-            client.permissionController.getGrantedPermissions()
-        } catch (_: Exception) {
+            val granted = client.permissionController.getGrantedPermissions()
+            val duration = System.currentTimeMillis() - startNs
+            HealthConnectLogger.logQuerySuccess(qId, "PermissionCheck", "Repository", duration, granted.size, coroutineCtx)
+            granted
+        } catch (ce: CancellationException) {
+            HealthConnectLogger.logQueryCancelled(qId, "PermissionCheck", "Repository", System.currentTimeMillis() - startNs, "CoroutineCancelled", coroutineCtx)
+            throw ce
+        } catch (e: Exception) {
+            HealthConnectLogger.logQueryError(qId, "PermissionCheck", "Repository", System.currentTimeMillis() - startNs, e, 1, coroutineCtx)
             emptySet()
         }
     }
@@ -82,17 +109,34 @@ class HealthConnectRepository(
         return granted.containsAll(requiredPermissions)
     }
 
-    // ------------------- PASSOS REAIS -------------------
-
-    suspend fun readTodaySteps(): Long {
-        return readStepsForDate(LocalDate.now())
+    suspend fun checkSyncStatus(): HealthSyncStatus {
+        if (!isAvailable()) return getSdkStatus()
+        val granted = getGrantedPermissions()
+        if (granted.isEmpty()) return HealthSyncStatus.PERMISSIONS_PENDING
+        return HealthSyncStatus.CONNECTED
     }
 
-    suspend fun readStepsForDate(date: LocalDate): Long {
+    // ------------------- PASSOS REAIS -------------------
+
+    suspend fun readTodaySteps(component: String = "HomeScreen"): Long {
+        return readStepsForDate(LocalDate.now(), component, "READ_TODAY_STEPS")
+    }
+
+    suspend fun readStepsForDate(date: LocalDate, component: String = "Repository", reason: String = "DATE_QUERY"): Long {
         val client = healthConnectClient ?: return 0L
+        if (!AppLifecycleTracker.isForeground) {
+            HealthConnectLogger.logQueryCancelled("SKIP", "StepsRecord", component, 0, "AppInBackground")
+            return 0L
+        }
+
+        val qId = HealthConnectLogger.nextQueryId("STEPS")
+        val coroutineCtx = currentCoroutineContext()
+        val startMs = System.currentTimeMillis()
         val zone = ZoneId.systemDefault()
         val startTime = date.atStartOfDay(zone).toInstant()
         val endTime = date.plusDays(1).atStartOfDay(zone).toInstant()
+
+        HealthConnectLogger.logQueryStart(qId, "StepsRecord", component, reason, coroutineCtx)
 
         return try {
             val response = client.aggregate(
@@ -102,6 +146,9 @@ class HealthConnectRepository(
                 )
             )
             val totalSteps = response[StepsRecord.COUNT_TOTAL] ?: 0L
+            val duration = System.currentTimeMillis() - startMs
+            HealthConnectLogger.logQuerySuccess(qId, "StepsRecord", component, duration, if (totalSteps > 0) 1 else 0, coroutineCtx)
+
             if (date == LocalDate.now()) {
                 database.healthDao().insertMetric(
                     HealthMetricEntity(
@@ -114,7 +161,12 @@ class HealthConnectRepository(
                 )
             }
             totalSteps
+        } catch (ce: CancellationException) {
+            HealthConnectLogger.logQueryCancelled(qId, "StepsRecord", component, System.currentTimeMillis() - startMs, "CancelledByLifecycle", coroutineCtx)
+            throw ce
         } catch (e: Exception) {
+            val duration = System.currentTimeMillis() - startMs
+            HealthConnectLogger.logQueryError(qId, "StepsRecord", component, duration, e, 1, coroutineCtx)
             if (date == LocalDate.now()) {
                 database.healthDao().getLatestMetric("steps")?.value?.toLong() ?: 0L
             } else 0L
@@ -123,11 +175,21 @@ class HealthConnectRepository(
 
     // ------------------- DISTÂNCIA REAL -------------------
 
-    suspend fun readDailyDistanceKm(date: LocalDate): Double {
+    suspend fun readDailyDistanceKm(date: LocalDate, component: String = "Repository"): Double {
         val client = healthConnectClient ?: return 0.0
+        if (!AppLifecycleTracker.isForeground) {
+            HealthConnectLogger.logQueryCancelled("SKIP", "DistanceRecord", component, 0, "AppInBackground")
+            return 0.0
+        }
+
+        val qId = HealthConnectLogger.nextQueryId("DIST")
+        val coroutineCtx = currentCoroutineContext()
+        val startMs = System.currentTimeMillis()
         val zone = ZoneId.systemDefault()
         val startTime = date.atStartOfDay(zone).toInstant()
         val endTime = date.plusDays(1).atStartOfDay(zone).toInstant()
+
+        HealthConnectLogger.logQueryStart(qId, "DistanceRecord", component, "READ_DAILY_DISTANCE", coroutineCtx)
 
         return try {
             val response = client.aggregate(
@@ -137,20 +199,38 @@ class HealthConnectRepository(
                 )
             )
             val distance = response[DistanceRecord.DISTANCE_TOTAL]?.inKilometers ?: 0.0
+            val duration = System.currentTimeMillis() - startMs
+            HealthConnectLogger.logQuerySuccess(qId, "DistanceRecord", component, duration, if (distance > 0.0) 1 else 0, coroutineCtx)
             distance
+        } catch (ce: CancellationException) {
+            HealthConnectLogger.logQueryCancelled(qId, "DistanceRecord", component, System.currentTimeMillis() - startMs, "CancelledByLifecycle", coroutineCtx)
+            throw ce
         } catch (e: Exception) {
+            val duration = System.currentTimeMillis() - startMs
+            HealthConnectLogger.logQueryError(qId, "DistanceRecord", component, duration, e, 1, coroutineCtx)
             0.0
         }
     }
 
-    suspend fun queryWeeklyDistance(weekStartDate: LocalDate): WeeklyDistanceSummary {
+    suspend fun queryWeeklyDistance(weekStartDate: LocalDate, component: String = "HomeScreen"): WeeklyDistanceSummary {
         val daySummaries = mutableListOf<DayDistanceSummary>()
-        val dayNames = listOf("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")
+        var permissionErrorEncountered = false
 
         for (i in 0..6) {
             val date = weekStartDate.plusDays(i.toLong())
-            val distance = readDailyDistanceKm(date)
-            val dayLabel = dayNames[i]
+            val dayLabel = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale("pt", "BR"))
+                .replaceFirstChar { it.uppercase() }
+                .take(3)
+
+            val distance = if (!permissionErrorEncountered && AppLifecycleTracker.isForeground) {
+                try {
+                    readDailyDistanceKm(date, component)
+                } catch (e: SecurityException) {
+                    permissionErrorEncountered = true
+                    0.0
+                }
+            } else 0.0
+
             daySummaries.add(
                 DayDistanceSummary(
                     date = date,
@@ -175,15 +255,25 @@ class HealthConnectRepository(
 
     // ------------------- CALORIAS ATIVAS REAIS -------------------
 
-    suspend fun readTodayActiveCalories(): Double {
-        return readActiveCaloriesForDate(LocalDate.now())
+    suspend fun readTodayActiveCalories(component: String = "HomeScreen"): Double {
+        return readActiveCaloriesForDate(LocalDate.now(), component)
     }
 
-    suspend fun readActiveCaloriesForDate(date: LocalDate): Double {
+    suspend fun readActiveCaloriesForDate(date: LocalDate, component: String = "Repository"): Double {
         val client = healthConnectClient ?: return 0.0
+        if (!AppLifecycleTracker.isForeground) {
+            HealthConnectLogger.logQueryCancelled("SKIP", "ActiveCaloriesBurnedRecord", component, 0, "AppInBackground")
+            return 0.0
+        }
+
+        val qId = HealthConnectLogger.nextQueryId("CAL")
+        val coroutineCtx = currentCoroutineContext()
+        val startMs = System.currentTimeMillis()
         val zone = ZoneId.systemDefault()
         val startTime = date.atStartOfDay(zone).toInstant()
         val endTime = date.plusDays(1).atStartOfDay(zone).toInstant()
+
+        HealthConnectLogger.logQueryStart(qId, "ActiveCaloriesBurnedRecord", component, "READ_ACTIVE_CALORIES", coroutineCtx)
 
         return try {
             val response = client.aggregate(
@@ -193,6 +283,9 @@ class HealthConnectRepository(
                 )
             )
             val calories = response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories ?: 0.0
+            val duration = System.currentTimeMillis() - startMs
+            HealthConnectLogger.logQuerySuccess(qId, "ActiveCaloriesBurnedRecord", component, duration, if (calories > 0.0) 1 else 0, coroutineCtx)
+
             if (date == LocalDate.now() && calories > 0) {
                 database.healthDao().insertMetric(
                     HealthMetricEntity(
@@ -205,16 +298,31 @@ class HealthConnectRepository(
                 )
             }
             calories
+        } catch (ce: CancellationException) {
+            HealthConnectLogger.logQueryCancelled(qId, "ActiveCaloriesBurnedRecord", component, System.currentTimeMillis() - startMs, "CancelledByLifecycle", coroutineCtx)
+            throw ce
         } catch (e: Exception) {
+            val duration = System.currentTimeMillis() - startMs
+            HealthConnectLogger.logQueryError(qId, "ActiveCaloriesBurnedRecord", component, duration, e, 1, coroutineCtx)
             0.0
         }
     }
 
     // ------------------- FREQUÊNCIA CARDÍACA ATUAL VS REPOUSO -------------------
 
-    suspend fun readLatestHeartRate(): Int? {
+    suspend fun readLatestHeartRate(component: String = "HomeScreen"): Int? {
         val client = healthConnectClient ?: return null
+        if (!AppLifecycleTracker.isForeground) {
+            HealthConnectLogger.logQueryCancelled("SKIP", "HeartRateRecord", component, 0, "AppInBackground")
+            return null
+        }
+
+        val qId = HealthConnectLogger.nextQueryId("HR")
+        val coroutineCtx = currentCoroutineContext()
+        val startMs = System.currentTimeMillis()
         val startTime = Instant.now().minus(24, ChronoUnit.HOURS)
+
+        HealthConnectLogger.logQueryStart(qId, "HeartRateRecord", component, "READ_LATEST_HR", coroutineCtx)
 
         return try {
             val response = client.readRecords(
@@ -224,15 +332,33 @@ class HealthConnectRepository(
                 )
             )
             val latestSample = response.records.lastOrNull()?.samples?.lastOrNull()
-            latestSample?.beatsPerMinute?.toInt()
+            val bpm = latestSample?.beatsPerMinute?.toInt()
+            val duration = System.currentTimeMillis() - startMs
+            HealthConnectLogger.logQuerySuccess(qId, "HeartRateRecord", component, duration, response.records.size, coroutineCtx)
+            bpm
+        } catch (ce: CancellationException) {
+            HealthConnectLogger.logQueryCancelled(qId, "HeartRateRecord", component, System.currentTimeMillis() - startMs, "CancelledByLifecycle", coroutineCtx)
+            throw ce
         } catch (e: Exception) {
+            val duration = System.currentTimeMillis() - startMs
+            HealthConnectLogger.logQueryError(qId, "HeartRateRecord", component, duration, e, 1, coroutineCtx)
             database.healthDao().getLatestMetric("heart_rate")?.value?.toInt()
         }
     }
 
-    suspend fun readLatestRestingHeartRate(): Int? {
+    suspend fun readLatestRestingHeartRate(component: String = "HomeScreen"): Int? {
         val client = healthConnectClient ?: return null
+        if (!AppLifecycleTracker.isForeground) {
+            HealthConnectLogger.logQueryCancelled("SKIP", "RestingHeartRateRecord", component, 0, "AppInBackground")
+            return null
+        }
+
+        val qId = HealthConnectLogger.nextQueryId("RHR")
+        val coroutineCtx = currentCoroutineContext()
+        val startMs = System.currentTimeMillis()
         val startTime = Instant.now().minus(48, ChronoUnit.HOURS)
+
+        HealthConnectLogger.logQueryStart(qId, "RestingHeartRateRecord", component, "READ_RESTING_HR", coroutineCtx)
 
         return try {
             val response = client.readRecords(
@@ -242,20 +368,37 @@ class HealthConnectRepository(
                 )
             )
             val record = response.records.lastOrNull()
-            record?.beatsPerMinute?.toInt()
+            val bpm = record?.beatsPerMinute?.toInt()
+            val duration = System.currentTimeMillis() - startMs
+            HealthConnectLogger.logQuerySuccess(qId, "RestingHeartRateRecord", component, duration, response.records.size, coroutineCtx)
+            bpm
+        } catch (ce: CancellationException) {
+            HealthConnectLogger.logQueryCancelled(qId, "RestingHeartRateRecord", component, System.currentTimeMillis() - startMs, "CancelledByLifecycle", coroutineCtx)
+            throw ce
         } catch (e: Exception) {
+            val duration = System.currentTimeMillis() - startMs
+            HealthConnectLogger.logQueryError(qId, "RestingHeartRateRecord", component, duration, e, 1, coroutineCtx)
             null
         }
     }
 
-    // ------------------- SONO REAL & ESTÁGIOS REAIS (SEM PORCENTAGENS FICTÍCIAS) -------------------
+    // ------------------- SONO REAL & ESTÁGIOS REAIS -------------------
 
-    suspend fun readSleepSessionForNight(nightDate: LocalDate): SleepSessionData? {
+    suspend fun readSleepSessionForNight(nightDate: LocalDate, component: String = "SleepScreen"): SleepSessionData? {
         val client = healthConnectClient ?: return null
+        if (!AppLifecycleTracker.isForeground) {
+            HealthConnectLogger.logQueryCancelled("SKIP", "SleepSessionRecord", component, 0, "AppInBackground")
+            return null
+        }
+
+        val qId = HealthConnectLogger.nextQueryId("SLEEP")
+        val coroutineCtx = currentCoroutineContext()
+        val startMs = System.currentTimeMillis()
         val zone = ZoneId.systemDefault()
-        // Noite que começa na véspera às 18:00 e vai até o dia seguinte às 16:00
         val searchStart = nightDate.minusDays(1).atTime(18, 0).atZone(zone).toInstant()
         val searchEnd = nightDate.atTime(16, 0).atZone(zone).toInstant()
+
+        HealthConnectLogger.logQueryStart(qId, "SleepSessionRecord", component, "READ_NIGHT_SLEEP for $nightDate", coroutineCtx)
 
         return try {
             val response = client.readRecords(
@@ -265,26 +408,42 @@ class HealthConnectRepository(
                 )
             )
 
-            // Pega a sessão mais longa ou mais recente dentro do intervalo daquela noite
             val record = response.records.maxByOrNull {
                 Duration.between(it.startTime, it.endTime).toMinutes()
-            } ?: return null
+            }
 
-            mapSleepSessionRecord(record)
+            val duration = System.currentTimeMillis() - startMs
+            HealthConnectLogger.logQuerySuccess(qId, "SleepSessionRecord", component, duration, response.records.size, coroutineCtx)
+
+            record?.let { mapSleepSessionRecord(it) }
+        } catch (ce: CancellationException) {
+            HealthConnectLogger.logQueryCancelled(qId, "SleepSessionRecord", component, System.currentTimeMillis() - startMs, "CancelledByLifecycle", coroutineCtx)
+            throw ce
         } catch (e: Exception) {
+            val duration = System.currentTimeMillis() - startMs
+            HealthConnectLogger.logQueryError(qId, "SleepSessionRecord", component, duration, e, 1, coroutineCtx)
             null
         }
     }
 
-    suspend fun queryWeeklySleep(weekStartDate: LocalDate): List<NightSleepSummary> {
+    suspend fun queryWeeklySleep(weekStartDate: LocalDate, component: String = "SleepScreen"): List<NightSleepSummary> {
         val result = mutableListOf<NightSleepSummary>()
         val formatter = DateTimeFormatter.ofPattern("HH:mm")
         val zone = ZoneId.systemDefault()
 
         val sessions = mutableListOf<SleepSessionData?>()
+        var permissionDenied = false
+
         for (i in 0..6) {
             val date = weekStartDate.plusDays(i.toLong())
-            val session = readSleepSessionForNight(date)
+            val session = if (!permissionDenied && AppLifecycleTracker.isForeground) {
+                try {
+                    readSleepSessionForNight(date, component)
+                } catch (e: SecurityException) {
+                    permissionDenied = true
+                    null
+                }
+            } else null
             sessions.add(session)
         }
 
@@ -297,13 +456,12 @@ class HealthConnectRepository(
             val date = weekStartDate.plusDays(i.toLong())
             val session = sessions[i]
 
-            if (session != null) {
+            if (session != null && session.totalDurationMinutes > 0L) {
                 val duration = session.totalDurationMinutes
                 val hours = duration / 60
                 val mins = duration % 60
                 val bedtimeStr = session.startTime.atZone(zone).format(formatter)
                 val wakeStr = session.endTime.atZone(zone).format(formatter)
-
                 val diffAvg = if (avgDuration > 0) duration - avgDuration else 0L
 
                 val assessment = when {
@@ -352,7 +510,6 @@ class HealthConnectRepository(
         var remMins = 0L
         var awakeMins = 0L
 
-        // Extrai EXCLUSIVAMENTE os estágios reais da API do Health Connect
         if (record.stages.isNotEmpty()) {
             record.stages.forEach { stage ->
                 val stageDuration = Duration.between(stage.startTime, stage.endTime).toMinutes().coerceAtLeast(0L)
@@ -417,12 +574,25 @@ class HealthConnectRepository(
 
     // ------------------- EXERCÍCIOS REAIS & SESSÕES -------------------
 
-    suspend fun queryExerciseSessions(startTime: Instant, endTime: Instant): List<ExerciseSessionData> {
+    /**
+     * Consulta leve para cálculo de ofensiva/streak: lê EXCLUSIVAMENTE os registros
+     * de ExerciseSessionRecord em 1 única chamada, sem disparar centenas de agregações.
+     */
+    suspend fun queryExerciseSessionTimes(startTime: Instant, endTime: Instant, component: String = "StreakEngine"): List<Instant> {
         val client = healthConnectClient ?: return emptyList()
-        val allRecords = mutableListOf<ExerciseSessionRecord>()
+        if (!AppLifecycleTracker.isForeground) {
+            HealthConnectLogger.logQueryCancelled("SKIP", "ExerciseSessionTimes", component, 0, "AppInBackground")
+            return emptyList()
+        }
+
+        val qId = HealthConnectLogger.nextQueryId("EX_TIMES")
+        val coroutineCtx = currentCoroutineContext()
+        val startMs = System.currentTimeMillis()
+        val startTimes = mutableListOf<Instant>()
         var pageToken: String? = null
 
-        // Paginação para nunca perder registros
+        HealthConnectLogger.logQueryStart(qId, "ExerciseSessionRecord(Times)", component, "STREAK_QUERY", coroutineCtx)
+
         do {
             try {
                 val response = client.readRecords(
@@ -433,53 +603,127 @@ class HealthConnectRepository(
                         pageToken = pageToken
                     )
                 )
-                allRecords.addAll(response.records)
+                response.records.forEach { startTimes.add(it.startTime) }
                 pageToken = response.pageToken
+            } catch (ce: CancellationException) {
+                HealthConnectLogger.logQueryCancelled(qId, "ExerciseSessionRecord(Times)", component, System.currentTimeMillis() - startMs, "CancelledByLifecycle", coroutineCtx)
+                throw ce
             } catch (e: Exception) {
+                HealthConnectLogger.logQueryError(qId, "ExerciseSessionRecord(Times)", component, System.currentTimeMillis() - startMs, e, 1, coroutineCtx)
                 break
             }
         } while (pageToken != null)
 
-        return allRecords.map { session ->
-            val durationMins = Duration.between(session.startTime, session.endTime).toMinutes().coerceAtLeast(1L)
+        val duration = System.currentTimeMillis() - startMs
+        HealthConnectLogger.logQuerySuccess(qId, "ExerciseSessionRecord(Times)", component, duration, startTimes.size, coroutineCtx)
+        return startTimes
+    }
 
-            // Calorias reais durante o exercício
-            val calories = try {
-                val cResponse = client.aggregate(
-                    AggregateRequest(
-                        metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
-                        timeRangeFilter = TimeRangeFilter.between(session.startTime, session.endTime)
-                    )
-                )
-                cResponse[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories
-            } catch (_: Exception) { null }
+    /**
+     * Consulta detalhada de exercícios para uma janela limitada (ex: 1 semana).
+     * Se uma SecurityException ocorrer (ex: app em background ou permissão negada),
+     * interrompe o laço IMEDIATAMENTE, evitando a repetição rápida de centenas de chamadas.
+     */
+    suspend fun queryExerciseSessions(
+        startTime: Instant,
+        endTime: Instant,
+        component: String = "ExerciseScreen",
+        reason: String = "LOAD_EXERCISES"
+    ): List<ExerciseSessionData> {
+        val client = healthConnectClient ?: return emptyList()
+        if (!AppLifecycleTracker.isForeground) {
+            HealthConnectLogger.logQueryCancelled("SKIP", "ExerciseSessionRecord", component, 0, "AppInBackground")
+            return emptyList()
+        }
 
-            // Distância real durante o exercício
-            val distanceKm = try {
-                val dResponse = client.aggregate(
-                    AggregateRequest(
-                        metrics = setOf(DistanceRecord.DISTANCE_TOTAL),
-                        timeRangeFilter = TimeRangeFilter.between(session.startTime, session.endTime)
-                    )
-                )
-                dResponse[DistanceRecord.DISTANCE_TOTAL]?.inKilometers
-            } catch (_: Exception) { null }
+        val qId = HealthConnectLogger.nextQueryId("EX_FULL")
+        val coroutineCtx = currentCoroutineContext()
+        val startMs = System.currentTimeMillis()
+        val allRecords = mutableListOf<ExerciseSessionRecord>()
+        var pageToken: String? = null
 
-            // Frequência Cardíaca real durante o exercício
-            val (avgHr, maxHr) = try {
-                val hrResponse = client.readRecords(
+        HealthConnectLogger.logQueryStart(qId, "ExerciseSessionRecord", component, reason, coroutineCtx)
+
+        do {
+            try {
+                val response = client.readRecords(
                     ReadRecordsRequest(
-                        recordType = HeartRateRecord::class,
-                        timeRangeFilter = TimeRangeFilter.between(session.startTime, session.endTime)
+                        recordType = ExerciseSessionRecord::class,
+                        timeRangeFilter = TimeRangeFilter.between(startTime, endTime),
+                        pageSize = 200,
+                        pageToken = pageToken
                     )
                 )
-                val samples = hrResponse.records.flatMap { it.samples }
-                if (samples.isNotEmpty()) {
-                    val avg = samples.map { it.beatsPerMinute }.average().toInt()
-                    val max = samples.maxOf { it.beatsPerMinute }.toInt()
-                    Pair(avg, max)
-                } else Pair(null, null)
-            } catch (_: Exception) { Pair(null, null) }
+                allRecords.addAll(response.records)
+                pageToken = response.pageToken
+            } catch (ce: CancellationException) {
+                HealthConnectLogger.logQueryCancelled(qId, "ExerciseSessionRecord", component, System.currentTimeMillis() - startMs, "CancelledByLifecycle", coroutineCtx)
+                throw ce
+            } catch (e: Exception) {
+                HealthConnectLogger.logQueryError(qId, "ExerciseSessionRecord", component, System.currentTimeMillis() - startMs, e, 1, coroutineCtx)
+                return emptyList()
+            }
+        } while (pageToken != null)
+
+        val resultList = mutableListOf<ExerciseSessionData>()
+        var securityErrorEncountered = false
+
+        for (session in allRecords) {
+            val durationMins = Duration.between(session.startTime, session.endTime).toMinutes().coerceAtLeast(1L)
+            var calories: Double? = null
+            var distanceKm: Double? = null
+            var avgHr: Int? = null
+            var maxHr: Int? = null
+
+            // Só consulta métricas adicionais se o app continuar no foreground e não tiver encontrado SecurityException
+            if (!securityErrorEncountered && AppLifecycleTracker.isForeground) {
+                try {
+                    val cResponse = client.aggregate(
+                        AggregateRequest(
+                            metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
+                            timeRangeFilter = TimeRangeFilter.between(session.startTime, session.endTime)
+                        )
+                    )
+                    calories = cResponse[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories
+                } catch (se: SecurityException) {
+                    securityErrorEncountered = true
+                    HealthConnectLogger.logQueryError(qId, "ActiveCalories(Session)", component, 0, se, 1, coroutineCtx)
+                } catch (_: Exception) {}
+
+                if (!securityErrorEncountered) {
+                    try {
+                        val dResponse = client.aggregate(
+                            AggregateRequest(
+                                metrics = setOf(DistanceRecord.DISTANCE_TOTAL),
+                                timeRangeFilter = TimeRangeFilter.between(session.startTime, session.endTime)
+                            )
+                        )
+                        distanceKm = dResponse[DistanceRecord.DISTANCE_TOTAL]?.inKilometers
+                    } catch (se: SecurityException) {
+                        securityErrorEncountered = true
+                        HealthConnectLogger.logQueryError(qId, "Distance(Session)", component, 0, se, 1, coroutineCtx)
+                    } catch (_: Exception) {}
+                }
+
+                if (!securityErrorEncountered) {
+                    try {
+                        val hrResponse = client.readRecords(
+                            ReadRecordsRequest(
+                                recordType = HeartRateRecord::class,
+                                timeRangeFilter = TimeRangeFilter.between(session.startTime, session.endTime)
+                            )
+                        )
+                        val samples = hrResponse.records.flatMap { it.samples }
+                        if (samples.isNotEmpty()) {
+                            avgHr = samples.map { it.beatsPerMinute }.average().toInt()
+                            maxHr = samples.maxOf { it.beatsPerMinute }.toInt()
+                        }
+                    } catch (se: SecurityException) {
+                        securityErrorEncountered = true
+                        HealthConnectLogger.logQueryError(qId, "HeartRate(Session)", component, 0, se, 1, coroutineCtx)
+                    } catch (_: Exception) {}
+                }
+            }
 
             val zone = when {
                 avgHr == null -> null
@@ -488,35 +732,44 @@ class HealthConnectRepository(
                 else -> "Leve (Zona 1/2)"
             }
 
-            ExerciseSessionData(
-                id = session.metadata.id,
-                title = session.title ?: mapExerciseTypeName(session.exerciseType),
-                exerciseType = session.exerciseType,
-                typeName = mapExerciseTypeName(session.exerciseType),
-                startTime = session.startTime,
-                endTime = session.endTime,
-                durationMinutes = durationMins,
-                caloriesKcal = calories,
-                distanceKm = distanceKm,
-                avgHeartRateBpm = avgHr,
-                maxHeartRateBpm = maxHr,
-                intensityZone = zone,
-                sourceApp = session.metadata.dataOrigin.packageName
+            resultList.add(
+                ExerciseSessionData(
+                    id = session.metadata.id,
+                    title = session.title ?: mapExerciseTypeName(session.exerciseType),
+                    exerciseType = session.exerciseType,
+                    typeName = mapExerciseTypeName(session.exerciseType),
+                    startTime = session.startTime,
+                    endTime = session.endTime,
+                    durationMinutes = durationMins,
+                    caloriesKcal = calories,
+                    distanceKm = distanceKm,
+                    avgHeartRateBpm = avgHr,
+                    maxHeartRateBpm = maxHr,
+                    intensityZone = zone,
+                    sourceApp = session.metadata.dataOrigin.packageName
+                )
             )
         }
+
+        val totalDuration = System.currentTimeMillis() - startMs
+        HealthConnectLogger.logQuerySuccess(qId, "ExerciseSessionRecord(Total)", component, totalDuration, resultList.size, coroutineCtx)
+        return resultList
     }
 
-    suspend fun queryWeeklyActivity(weekStartDate: LocalDate): List<DayActivitySummary> {
+    suspend fun queryWeeklyActivity(weekStartDate: LocalDate, component: String = "ExerciseScreen"): List<DayActivitySummary> {
         val zone = ZoneId.systemDefault()
         val startInstant = weekStartDate.atStartOfDay(zone).toInstant()
         val endInstant = weekStartDate.plusDays(7).atStartOfDay(zone).toInstant()
 
-        val allSessions = queryExerciseSessions(startInstant, endInstant)
+        val allSessions = queryExerciseSessions(startInstant, endInstant, component, "WEEKLY_ACTIVITY_QUERY")
         val daySummaries = mutableListOf<DayActivitySummary>()
-        val dayNames = listOf("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")
 
         for (i in 0..6) {
             val date = weekStartDate.plusDays(i.toLong())
+            val dayLabel = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale("pt", "BR"))
+                .replaceFirstChar { it.uppercase() }
+                .take(3)
+
             val daySessions = allSessions.filter {
                 val sDate = it.startTime.atZone(zone).toLocalDate()
                 sDate == date
@@ -527,7 +780,6 @@ class HealthConnectRepository(
             val totalDist = daySessions.mapNotNull { it.distanceKm }.sum()
             val hasActivity = daySessions.isNotEmpty()
 
-            // Intensidade baseada em volume real
             val intensityScore = when {
                 totalMins >= 60 -> 1.0f
                 totalMins >= 45 -> 0.8f
@@ -539,7 +791,7 @@ class HealthConnectRepository(
             daySummaries.add(
                 DayActivitySummary(
                     date = date,
-                    dayOfWeekLabel = dayNames[i],
+                    dayOfWeekLabel = dayLabel,
                     totalActiveMinutes = totalMins,
                     totalCaloriesKcal = totalCalories,
                     totalDistanceKm = totalDist,
@@ -555,24 +807,23 @@ class HealthConnectRepository(
 
     // ------------------- OFENSIVA DE DIAS CONSECUTIVOS (ESTILO DUOLINGO) -------------------
 
-    suspend fun calculateStreak(weeklyGoalDays: Int): StreakData {
+    suspend fun calculateStreak(weeklyGoalDays: Int, component: String = "HomeScreen"): StreakData {
         val zone = ZoneId.systemDefault()
         val today = LocalDate.now()
         val thirtyDaysAgo = today.minusDays(30).atStartOfDay(zone).toInstant()
         val nowInstant = Instant.now()
 
-        val sessions = queryExerciseSessions(thirtyDaysAgo, nowInstant)
-        val workoutDates = sessions.map { it.startTime.atZone(zone).toLocalDate() }.toSet()
+        // Otimização crucial: usa queryExerciseSessionTimes em vez de queryExerciseSessions com agregados!
+        val sessionStartTimes = queryExerciseSessionTimes(thirtyDaysAgo, nowInstant, component)
+        val workoutDates = sessionStartTimes.map { it.atZone(zone).toLocalDate() }.toSet()
 
-        // Contagem de dias ativos nesta semana
-        val startOfWeek = today.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+        val startOfWeek = today.with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
         var activeDaysThisWeek = 0
         for (i in 0..6) {
             val d = startOfWeek.plusDays(i.toLong())
             if (workoutDates.contains(d)) activeDaysThisWeek++
         }
 
-        // Calcula sequência atual (dias consecutivos até hoje ou ontem)
         var currentStreak = 0
         var checkDate = if (workoutDates.contains(today)) today else today.minusDays(1)
 
@@ -581,7 +832,6 @@ class HealthConnectRepository(
             checkDate = checkDate.minusDays(1)
         }
 
-        // Calcula melhor sequência histórica nos 30 dias
         var maxStreak = 0
         var tempStreak = 0
         for (i in 30 downTo 0) {
@@ -615,9 +865,16 @@ class HealthConnectRepository(
 
     // ------------------- COMPOSIÇÃO CORPORAL -------------------
 
-    suspend fun readLatestWeightAndBodyFat(): Pair<Double?, Double?> {
+    suspend fun readLatestWeightAndBodyFat(component: String = "HomeScreen"): Pair<Double?, Double?> {
         val client = healthConnectClient ?: return Pair(null, null)
+        if (!AppLifecycleTracker.isForeground) return Pair(null, null)
+
+        val qId = HealthConnectLogger.nextQueryId("BODY")
+        val coroutineCtx = currentCoroutineContext()
+        val startMs = System.currentTimeMillis()
         val startTime = Instant.now().minus(30, ChronoUnit.DAYS)
+
+        HealthConnectLogger.logQueryStart(qId, "Weight/BodyFatRecord", component, "READ_BODY_COMPOSITION", coroutineCtx)
 
         val weight = try {
             client.readRecords(
@@ -626,7 +883,10 @@ class HealthConnectRepository(
                     timeRangeFilter = TimeRangeFilter.between(startTime, Instant.now())
                 )
             ).records.lastOrNull()?.weight?.inKilograms
-        } catch (_: Exception) { null }
+        } catch (e: Exception) {
+            HealthConnectLogger.logQueryError(qId, "WeightRecord", component, 0, e, 1, coroutineCtx)
+            null
+        }
 
         val fat = try {
             client.readRecords(
@@ -635,59 +895,84 @@ class HealthConnectRepository(
                     timeRangeFilter = TimeRangeFilter.between(startTime, Instant.now())
                 )
             ).records.lastOrNull()?.percentage?.value
-        } catch (_: Exception) { null }
+        } catch (e: Exception) {
+            HealthConnectLogger.logQueryError(qId, "BodyFatRecord", component, 0, e, 1, coroutineCtx)
+            null
+        }
 
+        val duration = System.currentTimeMillis() - startMs
+        HealthConnectLogger.logQuerySuccess(qId, "Weight/BodyFatRecord", component, duration, if (weight != null || fat != null) 1 else 0, coroutineCtx)
         return Pair(weight, fat)
     }
 
-    suspend fun checkSyncStatus(): HealthSyncStatus {
-        if (!isAvailable()) return getSdkStatus()
-        val granted = getGrantedPermissions()
-        if (granted.isEmpty()) return HealthSyncStatus.PERMISSIONS_PENDING
-        return HealthSyncStatus.CONNECTED
-    }
+    // ------------------- SINCRONIZAÇÃO COMPLETA COM CACHE E MUTEX -------------------
 
-    suspend fun fetchAllLiveHealthData(): LiveHealthData {
-        val steps = readTodaySteps()
-        val activeCalories = readTodayActiveCalories().toInt()
-        val latestHeartRate = readLatestHeartRate()
-        val restingHeartRate = readLatestRestingHeartRate()
-        val today = LocalDate.now()
-        val sleepSession = readSleepSessionForNight(today)
-        val zone = ZoneId.systemDefault()
-        val weekStart = today.minusDays(7).atStartOfDay(zone).toInstant()
-        val exercises = queryExerciseSessions(weekStart, Instant.now())
-        val (weight, bodyFat) = readLatestWeightAndBodyFat()
-        val distanceKm = readDailyDistanceKm(today)
+    suspend fun fetchAllLiveHealthData(forceRefresh: Boolean = false, component: String = "MainActivity"): LiveHealthData {
+        val now = System.currentTimeMillis()
+        val cached = cachedLiveData
 
-        val formatter = DateTimeFormatter.ofPattern("HH:mm")
-        val sleepDuration = sleepSession?.totalDurationMinutes ?: 0L
-        val sleepStartStr = sleepSession?.let { it.startTime.atZone(zone).format(formatter) } ?: "--:--"
-        val sleepEndStr = sleepSession?.let { it.endTime.atZone(zone).format(formatter) } ?: "--:--"
+        // Retorna cache em memória se a consulta anterior ocorreu há menos de 3 minutos
+        if (!forceRefresh && cached != null && (now - lastLiveDataFetchTime) < 180_000L) {
+            HealthConnectLogger.logQuerySuccess("CACHE", "LiveHealthData", component, 0, 1)
+            return cached
+        }
 
-        val hasRealData = steps > 0 || latestHeartRate != null || restingHeartRate != null || sleepDuration > 0 || exercises.isNotEmpty() || distanceKm > 0.0
+        if (!AppLifecycleTracker.isForeground) {
+            HealthConnectLogger.logQueryCancelled("SKIP", "LiveHealthData", component, 0, "AppInBackground")
+            return cached ?: LiveHealthData()
+        }
 
-        return LiveHealthData(
-            steps = steps,
-            activeCaloriesKcal = activeCalories,
-            heartRateBpm = latestHeartRate,
-            restingHeartRateBpm = restingHeartRate,
-            sleepDurationMinutes = sleepDuration,
-            sleepStartTime = sleepStartStr,
-            sleepEndTime = sleepEndStr,
-            sleepStageDeep = sleepSession?.deepMinutes ?: 0L,
-            sleepStageLight = sleepSession?.lightMinutes ?: 0L,
-            sleepStageRem = sleepSession?.remMinutes ?: 0L,
-            sleepStageAwake = sleepSession?.awakeMinutes ?: 0L,
-            weeklyExerciseDays = exercises.map { it.startTime.atZone(zone).toLocalDate() }.toSet().size,
-            weeklyExerciseMinutes = exercises.sumOf { it.durationMinutes },
-            weightKg = weight,
-            bodyFatPct = bodyFat,
-            distanceKm = distanceKm,
-            lastSyncTimestamp = System.currentTimeMillis(),
-            isRealHealthConnectData = hasRealData,
-            sourcePackage = if (hasRealData) "Health Connect Live" else "Aguardando Leitura"
-        )
+        return syncMutex.withLock {
+            // Re-verifica cache sob o lock
+            if (!forceRefresh && cachedLiveData != null && (System.currentTimeMillis() - lastLiveDataFetchTime) < 180_000L) {
+                return@withLock cachedLiveData!!
+            }
+
+            val steps = readTodaySteps(component)
+            val activeCalories = readTodayActiveCalories(component).toInt()
+            val latestHeartRate = readLatestHeartRate(component)
+            val restingHeartRate = readLatestRestingHeartRate(component)
+            val today = LocalDate.now()
+            val sleepSession = readSleepSessionForNight(today, component)
+            val zone = ZoneId.systemDefault()
+            val weekStart = today.minusDays(7).atStartOfDay(zone).toInstant()
+            val exercises = queryExerciseSessions(weekStart, Instant.now(), component, "LIVE_FETCH_RECENT_EXERCISES")
+            val (weight, bodyFat) = readLatestWeightAndBodyFat(component)
+            val distanceKm = readDailyDistanceKm(today, component)
+
+            val formatter = DateTimeFormatter.ofPattern("HH:mm")
+            val sleepDuration = sleepSession?.totalDurationMinutes ?: 0L
+            val sleepStartStr = sleepSession?.let { it.startTime.atZone(zone).format(formatter) } ?: "--:--"
+            val sleepEndStr = sleepSession?.let { it.endTime.atZone(zone).format(formatter) } ?: "--:--"
+
+            val hasRealData = steps > 0 || latestHeartRate != null || restingHeartRate != null || sleepDuration > 0 || exercises.isNotEmpty() || distanceKm > 0.0
+
+            val result = LiveHealthData(
+                steps = steps,
+                activeCaloriesKcal = activeCalories,
+                heartRateBpm = latestHeartRate,
+                restingHeartRateBpm = restingHeartRate,
+                sleepDurationMinutes = sleepDuration,
+                sleepStartTime = sleepStartStr,
+                sleepEndTime = sleepEndStr,
+                sleepStageDeep = sleepSession?.deepMinutes ?: 0L,
+                sleepStageLight = sleepSession?.lightMinutes ?: 0L,
+                sleepStageRem = sleepSession?.remMinutes ?: 0L,
+                sleepStageAwake = sleepSession?.awakeMinutes ?: 0L,
+                weeklyExerciseDays = exercises.map { it.startTime.atZone(zone).toLocalDate() }.toSet().size,
+                weeklyExerciseMinutes = exercises.sumOf { it.durationMinutes },
+                weightKg = weight,
+                bodyFatPct = bodyFat,
+                distanceKm = distanceKm,
+                lastSyncTimestamp = System.currentTimeMillis(),
+                isRealHealthConnectData = hasRealData,
+                sourcePackage = if (hasRealData) "Health Connect Live" else "Aguardando Leitura"
+            )
+
+            cachedLiveData = result
+            lastLiveDataFetchTime = System.currentTimeMillis()
+            result
+        }
     }
 
     private fun mapExerciseTypeName(type: Int): String {
@@ -729,4 +1014,3 @@ data class LiveHealthData(
     val isRealHealthConnectData: Boolean = false,
     val sourcePackage: String = "Health Connect"
 )
-

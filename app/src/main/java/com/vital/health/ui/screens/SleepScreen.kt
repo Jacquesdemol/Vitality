@@ -19,10 +19,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vital.health.data.UserProfile
+import com.vital.health.healthconnect.HealthConnectLogger
 import com.vital.health.healthconnect.LiveHealthData
 import com.vital.health.model.NightSleepSummary
 import com.vital.health.model.SleepStageType
 import com.vital.health.theme.VitalTheme
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -36,12 +38,17 @@ fun SleepScreen(
     onNextWeek: () -> Unit = {}
 ) {
     val colors = VitalTheme.colors
+    val today = LocalDate.now()
 
-    var selectedNightIndex by remember { mutableIntStateOf(weeklySleep.size - 1) }
+    // Seleção vinculada estritamente à DATA real (LocalDate), chaveada na semana e dados carregados
+    var selectedDate by remember(currentWeekOffset, weeklySleep.firstOrNull()?.date) {
+        val todayInWeek = weeklySleep.find { it.date == today }?.date
+        val initial = todayInWeek ?: weeklySleep.lastOrNull()?.date ?: today.plusWeeks(currentWeekOffset)
+        mutableStateOf(initial)
+    }
 
-    // Clamp safe index
-    val safeIndex = selectedNightIndex.coerceIn(0, (weeklySleep.size - 1).coerceAtLeast(0))
-    val selectedNight = if (weeklySleep.isNotEmpty()) weeklySleep[safeIndex] else null
+    // Busca o resumo da noite EXATAMENTE pela data selecionada
+    val selectedNight = weeklySleep.find { it.date == selectedDate }
 
     val totalWeekSleepMinutes = weeklySleep.sumOf { it.totalMinutes }
     val daysWithSleep = weeklySleep.count { it.totalMinutes > 0 }
@@ -212,16 +219,26 @@ fun SleepScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.Bottom
                         ) {
-                            weeklySleep.forEachIndexed { idx, night ->
-                                val isSelected = idx == safeIndex
+                            weeklySleep.forEach { night ->
+                                val isSelected = night.date == selectedDate
                                 val ratio = (night.totalMinutes.toFloat() / maxMins).coerceIn(0.08f, 1f)
-                                val dayLabel = night.date.format(DateTimeFormatter.ofPattern("EEE", Locale("pt", "BR"))).take(3).uppercase()
+                                val dayLabel = night.date.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, Locale("pt", "BR"))
+                                    .replaceFirstChar { it.uppercase() }
+                                    .take(3)
 
                                 Column(
                                     modifier = Modifier
                                         .weight(1f)
                                         .clip(RoundedCornerShape(8.dp))
-                                        .clickable { selectedNightIndex = idx }
+                                        .clickable {
+                                            selectedDate = night.date
+                                            HealthConnectLogger.logDaySelection(
+                                                "SleepScreen",
+                                                night.date.toString(),
+                                                "${night.date.minusDays(1)} 18:00 - ${night.date} 16:00",
+                                                if (night.session != null) 1 else 0
+                                            )
+                                        }
                                         .padding(vertical = 4.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Bottom
@@ -281,213 +298,211 @@ fun SleepScreen(
         }
 
         // Details Section for the Selected Night
-        if (selectedNight != null) {
-            val session = selectedNight.session
-            val formattedDate = selectedNight.date.format(
-                DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM", Locale("pt", "BR"))
-            )
+        val session = selectedNight?.session
+        val formattedDate = selectedDate.format(
+            DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM", Locale("pt", "BR"))
+        )
+        val hasSleepData = selectedNight != null && selectedNight.totalMinutes > 0L
 
-            item {
-                Card(
-                    shape = RoundedCornerShape(26.dp),
-                    colors = CardDefaults.cardColors(containerColor = colors.surface),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, colors.cardBorder, RoundedCornerShape(26.dp))
-                ) {
-                    Column(modifier = Modifier.padding(18.dp)) {
+        item {
+            Card(
+                shape = RoundedCornerShape(26.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, colors.cardBorder, RoundedCornerShape(26.dp))
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = formattedDate.replaceFirstChar { it.uppercase() },
+                                color = colors.textPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (session != null)
+                                    "Dormiu às ${selectedNight.formattedBedtime} • Acordou às ${selectedNight.formattedWakeTime}"
+                                else
+                                    "Sem registro de sono para esta noite",
+                                color = colors.textSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+
+                        if (hasSleepData && selectedNight != null) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(colors.surfaceVariant)
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = selectedNight.qualityAssessment,
+                                    color = colors.textPrimary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+
+                    if (hasSleepData && selectedNight != null) {
+                        Spacer(modifier = Modifier.height(14.dp))
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.Bottom
                         ) {
-                            Column {
+                            Row(verticalAlignment = Alignment.Bottom) {
                                 Text(
-                                    text = formattedDate.replaceFirstChar { it.uppercase() },
+                                    text = "${selectedNight.totalMinutes / 60}",
                                     color = colors.textPrimary,
-                                    fontSize = 15.sp,
+                                    fontSize = 34.sp,
                                     fontWeight = FontWeight.Bold
                                 )
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = if (session != null)
-                                        "Dormiu às ${selectedNight.formattedBedtime} • Acordou às ${selectedNight.formattedWakeTime}"
-                                    else
-                                        "Sem registro de sono para esta noite",
+                                    text = "h",
                                     color = colors.textSecondary,
-                                    fontSize = 12.sp
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.padding(bottom = 5.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "${selectedNight.totalMinutes % 60}",
+                                    color = colors.textPrimary,
+                                    fontSize = 34.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "min",
+                                    color = colors.textSecondary,
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.padding(bottom = 5.dp)
                                 )
                             }
 
-                            if (selectedNight.totalMinutes > 0) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(colors.surfaceVariant)
-                                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = selectedNight.qualityAssessment,
-                                        color = colors.textPrimary,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
+                            if (selectedNight.comparisonWithWeeklyAvgMinutes != 0L) {
+                                val isAbove = selectedNight.comparisonWithWeeklyAvgMinutes > 0
+                                Text(
+                                    text = (if (isAbove) "▲ +" else "▼ ") +
+                                            "${Math.abs(selectedNight.comparisonWithWeeklyAvgMinutes)} min vs média",
+                                    color = if (isAbove) Color(0xFF66BB6A) else Color(0xFFFFB74D),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(bottom = 6.dp)
+                                )
                             }
                         }
 
-                        if (selectedNight.totalMinutes > 0) {
-                            Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(18.dp))
 
+                        // Hypnogram / Sleep Stages Visualization
+                        if (session != null && session.hasStages && session.stages.isNotEmpty()) {
+                            Text(
+                                text = "Hipnograma de Estágios Reais",
+                                color = colors.textPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Chronological stages bar
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.Bottom
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(colors.surfaceVariant),
+                                horizontalArrangement = Arrangement.spacedBy(1.dp)
                             ) {
-                                Row(verticalAlignment = Alignment.Bottom) {
-                                    Text(
-                                        text = "${selectedNight.totalMinutes / 60}",
-                                        color = colors.textPrimary,
-                                        fontSize = 34.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "h",
-                                        color = colors.textSecondary,
-                                        fontSize = 14.sp,
-                                        modifier = Modifier.padding(bottom = 5.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "${selectedNight.totalMinutes % 60}",
-                                        color = colors.textPrimary,
-                                        fontSize = 34.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "min",
-                                        color = colors.textSecondary,
-                                        fontSize = 14.sp,
-                                        modifier = Modifier.padding(bottom = 5.dp)
-                                    )
-                                }
+                                val totalStageMinutes = session.stages.sumOf { it.durationMinutes }.coerceAtLeast(1L)
+                                session.stages.forEach { interval ->
+                                    val weight = (interval.durationMinutes.toFloat() / totalStageMinutes).coerceAtLeast(0.02f)
+                                    val stageColor = when (interval.stageType) {
+                                        SleepStageType.DEEP -> colors.primary
+                                        SleepStageType.REM -> Color(0xFFBA68C8)
+                                        SleepStageType.LIGHT -> colors.textSecondary
+                                        SleepStageType.AWAKE, SleepStageType.OUT_OF_BED -> Color(0xFFFF8A65)
+                                        SleepStageType.UNKNOWN -> colors.surfaceVariant
+                                    }
 
-                                if (selectedNight.comparisonWithWeeklyAvgMinutes != 0L) {
-                                    val isAbove = selectedNight.comparisonWithWeeklyAvgMinutes > 0
-                                    Text(
-                                        text = (if (isAbove) "▲ +" else "▼ ") +
-                                                "${Math.abs(selectedNight.comparisonWithWeeklyAvgMinutes)} min vs média",
-                                        color = if (isAbove) Color(0xFF66BB6A) else Color(0xFFFFB74D),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier.padding(bottom = 6.dp)
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(weight)
+                                            .fillMaxHeight()
+                                            .background(stageColor)
                                     )
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(18.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
 
-                            // Hypnogram / Sleep Stages Visualization
-                            if (session != null && session.hasStages && session.stages.isNotEmpty()) {
-                                Text(
-                                    text = "Hipnograma de Estágios Reais",
-                                    color = colors.textPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                // Chronological stages bar
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(48.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(colors.surfaceVariant),
-                                    horizontalArrangement = Arrangement.spacedBy(1.dp)
-                                ) {
-                                    val totalStageMinutes = session.stages.sumOf { it.durationMinutes }.coerceAtLeast(1L)
-                                    session.stages.forEach { interval ->
-                                        val weight = (interval.durationMinutes.toFloat() / totalStageMinutes).coerceAtLeast(0.02f)
-                                        val stageColor = when (interval.stageType) {
-                                            SleepStageType.DEEP -> colors.primary
-                                            SleepStageType.REM -> Color(0xFFBA68C8)
-                                            SleepStageType.LIGHT -> colors.textSecondary
-                                            SleepStageType.AWAKE, SleepStageType.OUT_OF_BED -> Color(0xFFFF8A65)
-                                            SleepStageType.UNKNOWN -> colors.surfaceVariant
-                                        }
-
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(weight)
-                                                .fillMaxHeight()
-                                                .background(stageColor)
-                                        )
-                                    }
+                            // Real stages legend with minutes
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column {
+                                    Text(text = "• Profundo", color = colors.textPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text(text = "${session.deepMinutes} min", color = colors.textSecondary, fontSize = 11.sp)
                                 }
-
-                                Spacer(modifier = Modifier.height(12.dp))
-
-                                // Real stages legend with minutes
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column {
-                                        Text(text = "• Profundo", color = colors.textPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                        Text(text = "${session.deepMinutes} min", color = colors.textSecondary, fontSize = 11.sp)
-                                    }
-                                    Column {
-                                        Text(text = "• REM", color = Color(0xFFBA68C8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                        Text(text = "${session.remMinutes} min", color = colors.textSecondary, fontSize = 11.sp)
-                                    }
-                                    Column {
-                                        Text(text = "• Leve", color = colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                        Text(text = "${session.lightMinutes} min", color = colors.textSecondary, fontSize = 11.sp)
-                                    }
-                                    Column {
-                                        Text(text = "• Acordado", color = Color(0xFFFF8A65), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                        Text(text = "${session.awakeMinutes} min", color = colors.textSecondary, fontSize = 11.sp)
-                                    }
+                                Column {
+                                    Text(text = "• REM", color = Color(0xFFBA68C8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text(text = "${session.remMinutes} min", color = colors.textSecondary, fontSize = 11.sp)
                                 }
-                            } else {
-                                // Notification explaining lack of granular stages
-                                Card(
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = CardDefaults.cardColors(containerColor = colors.surfaceVariant),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Info,
-                                            contentDescription = null,
-                                            tint = colors.textSecondary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Text(
-                                            text = "A pulseira ou app de origem registrou a duração total do sono, mas não forneceu os estágios detalhados (REM, Leve, Profundo) no Health Connect para esta noite.",
-                                            color = colors.textSecondary,
-                                            fontSize = 11.sp,
-                                            lineHeight = 16.sp
-                                        )
-                                    }
+                                Column {
+                                    Text(text = "• Leve", color = colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text(text = "${session.lightMinutes} min", color = colors.textSecondary, fontSize = 11.sp)
+                                }
+                                Column {
+                                    Text(text = "• Acordado", color = Color(0xFFFF8A65), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text(text = "${session.awakeMinutes} min", color = colors.textSecondary, fontSize = 11.sp)
                                 }
                             }
                         } else {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = "Nenhuma sessão de sono encontrada no Health Connect para este dia. Certifique-se de que sua pulseira Amazfit/Zepp sincronizou com o aplicativo Zepp e com o Health Connect.",
-                                color = colors.textSecondary,
-                                fontSize = 12.sp,
-                                lineHeight = 17.sp
-                            )
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = colors.surfaceVariant),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Info,
+                                        contentDescription = null,
+                                        tint = colors.textSecondary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = "A pulseira ou app de origem registrou a duração total do sono, mas não forneceu os estágios detalhados (REM, Leve, Profundo) no Health Connect para esta noite.",
+                                        color = colors.textSecondary,
+                                        fontSize = 11.sp,
+                                        lineHeight = 16.sp
+                                    )
+                                }
+                            }
                         }
+                    } else {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Nenhuma sessão de sono encontrada no Health Connect para esta data. Os dados aparecem automaticamente assim que a sincronização for realizada pelo app de origem.",
+                            color = colors.textSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp
+                        )
                     }
                 }
             }

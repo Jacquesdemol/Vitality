@@ -14,12 +14,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vital.health.data.UserProfile
+import com.vital.health.healthconnect.HealthConnectLogger
 import com.vital.health.healthconnect.LiveHealthData
 import com.vital.health.model.DayActivitySummary
 import com.vital.health.model.ExerciseSessionData
@@ -40,12 +40,17 @@ fun ExerciseScreen(
     onNextWeek: () -> Unit = {}
 ) {
     val colors = VitalTheme.colors
+    val today = LocalDate.now()
 
-    var selectedDayIndex by remember { mutableIntStateOf(weeklyActivity.size - 1) }
+    // Seleção vinculada estritamente à DATA real (LocalDate), com recálculo chaveado na semana exibida
+    var selectedDate by remember(currentWeekOffset, weeklyActivity.firstOrNull()?.date) {
+        val todayInWeek = weeklyActivity.find { it.date == today }?.date
+        val initial = todayInWeek ?: weeklyActivity.lastOrNull()?.date ?: today.plusWeeks(currentWeekOffset)
+        mutableStateOf(initial)
+    }
 
-    // Keep index clamped if weeklyActivity size changes
-    val safeIndex = selectedDayIndex.coerceIn(0, (weeklyActivity.size - 1).coerceAtLeast(0))
-    val selectedDay = if (weeklyActivity.isNotEmpty()) weeklyActivity[safeIndex] else null
+    // Busca os dados do dia EXATAMENTE pela data selecionada, evitando retenção de dados de dias anteriores
+    val selectedDay = weeklyActivity.find { it.date == selectedDate }
 
     val totalWeekMinutes = weeklyActivity.sumOf { it.totalActiveMinutes }
     val totalWeekCalories = weeklyActivity.sumOf { it.totalCaloriesKcal }
@@ -255,7 +260,7 @@ fun ExerciseScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // 7 Interactive Day Bars
+                    // 7 Interactive Day Bars (Seg a Dom)
                     if (weeklyActivity.isNotEmpty()) {
                         Row(
                             modifier = Modifier
@@ -264,15 +269,23 @@ fun ExerciseScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.Bottom
                         ) {
-                            weeklyActivity.forEachIndexed { idx, day ->
-                                val isSelected = idx == safeIndex
-                                val barHeightRatio = day.intensityScore.coerceIn(0.1f, 1f)
+                            weeklyActivity.forEach { day ->
+                                val isSelected = day.date == selectedDate
+                                val barHeightRatio = day.intensityScore.coerceIn(0.12f, 1f)
 
                                 Column(
                                     modifier = Modifier
                                         .weight(1f)
                                         .clip(RoundedCornerShape(8.dp))
-                                        .clickable { selectedDayIndex = idx }
+                                        .clickable {
+                                            selectedDate = day.date
+                                            HealthConnectLogger.logDaySelection(
+                                                "ExerciseScreen",
+                                                day.date.toString(),
+                                                "${day.date}T00:00 - ${day.date}T23:59",
+                                                day.exerciseSessions.size
+                                            )
+                                        }
                                         .padding(vertical = 4.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Bottom
@@ -331,116 +344,115 @@ fun ExerciseScreen(
             }
         }
 
-        // Details Section for the Selected Day
-        if (selectedDay != null) {
-            item {
-                val formattedDate = selectedDay.date.format(
-                    DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM", Locale("pt", "BR"))
-                )
+        // Details Section for the Selected Day (Vinculado estritamente à data selecionada)
+        item {
+            val formattedDate = selectedDate.format(
+                DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM", Locale("pt", "BR"))
+            )
+            val hasActivity = selectedDay?.hasActivity == true
 
-                Card(
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(containerColor = colors.surface),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, colors.cardBorder, RoundedCornerShape(22.dp))
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
+            Card(
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, colors.cardBorder, RoundedCornerShape(22.dp))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = formattedDate.replaceFirstChar { it.uppercase() },
+                                color = colors.textPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (hasActivity)
+                                    "${selectedDay?.exerciseSessions?.size ?: 0} sessão(ões) registrada(s)"
+                                else
+                                    "Nenhum treino registrado neste dia",
+                                color = colors.textSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+
+                        if (hasActivity && selectedDay != null) {
+                            Column(horizontalAlignment = Alignment.End) {
                                 Text(
-                                    text = formattedDate.replaceFirstChar { it.uppercase() },
+                                    text = "${selectedDay.totalActiveMinutes} min",
                                     color = colors.textPrimary,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = if (selectedDay.hasActivity)
-                                        "${selectedDay.exerciseSessions.size} sessão(ões) registrada(s)"
-                                    else
-                                        "Nenhum treino registrado neste dia",
+                                    text = "${selectedDay.totalCaloriesKcal.toInt()} kcal",
                                     color = colors.textSecondary,
-                                    fontSize = 12.sp
+                                    fontSize = 11.sp
                                 )
-                            }
-
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text(
-                                        text = "${selectedDay.totalActiveMinutes} min",
-                                        color = colors.textPrimary,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = "${selectedDay.totalCaloriesKcal.toInt()} kcal",
-                                        color = colors.textSecondary,
-                                        fontSize = 11.sp
-                                    )
-                                }
                             }
                         }
                     }
                 }
             }
+        }
 
-            // Real Exercise Sessions List for Selected Day
-            if (selectedDay.exerciseSessions.isNotEmpty()) {
-                item {
-                    Text(
-                        text = "Treinos do dia",
-                        color = colors.textPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                    )
-                }
+        // Real Exercise Sessions List for Selected Day
+        if (selectedDay != null && selectedDay.exerciseSessions.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Treinos do dia",
+                    color = colors.textPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                )
+            }
 
-                items(selectedDay.exerciseSessions.size) { sessionIdx ->
-                    val session = selectedDay.exerciseSessions[sessionIdx]
-                    ExerciseSessionCard(session = session)
-                }
-            } else {
-                item {
-                    Card(
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = colors.surface),
+            items(selectedDay.exerciseSessions.size) { sessionIdx ->
+                val session = selectedDay.exerciseSessions[sessionIdx]
+                ExerciseSessionCard(session = session)
+            }
+        } else {
+            item {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = colors.surface),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, colors.cardBorder, RoundedCornerShape(20.dp))
+                ) {
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, colors.cardBorder, RoundedCornerShape(20.dp))
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.FitnessCenter,
-                                contentDescription = null,
-                                tint = colors.textSecondary.copy(alpha = 0.5f),
-                                modifier = Modifier.size(36.dp)
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = "Nenhum treino neste dia",
-                                color = colors.textPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Os exercícios registrados na sua pulseira ou apps autorizados aparecerão automaticamente aqui via Health Connect.",
-                                color = colors.textSecondary,
-                                fontSize = 12.sp,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                lineHeight = 17.sp
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.FitnessCenter,
+                            contentDescription = null,
+                            tint = colors.textSecondary.copy(alpha = 0.5f),
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Nenhum treino neste dia",
+                            color = colors.textPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Os treinos registrados no Health Connect aparecerão automaticamente aqui quando houver atividade nesta data.",
+                            color = colors.textSecondary,
+                            fontSize = 12.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            lineHeight = 17.sp
+                        )
                     }
                 }
             }
@@ -591,7 +603,7 @@ fun ExerciseSessionCard(session: ExerciseSessionData) {
                 }
             }
 
-            // Additional details row: Heart rate & source
+            // Detalhes de Frequência Cardíaca e origem
             if (session.avgHeartRateBpm != null || session.sourceApp.isNotBlank()) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Divider(color = colors.cardBorder)
