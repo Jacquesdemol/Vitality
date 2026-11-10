@@ -22,6 +22,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vital.health.data.CalorieGoalMode
+import com.vital.health.data.Gender
 import com.vital.health.data.UserGoals
 import com.vital.health.data.UserProfile
 import com.vital.health.notifications.VitalNotificationHelper
@@ -599,12 +601,22 @@ fun SettingsScreen(
         var editAgeStr by remember { mutableStateOf(userProfile.age.toString()) }
         var editHeightStr by remember { mutableStateOf(userProfile.heightCm.toString()) }
         var editWeightStr by remember { mutableStateOf(userProfile.weightKg.toString()) }
+        var editGender by remember { mutableStateOf(userProfile.gender) }
+
+        val previewWeight = editWeightStr.replace(',', '.').toDoubleOrNull() ?: userProfile.weightKg
+        val previewHeight = editHeightStr.toDoubleOrNull() ?: userProfile.heightCm
+        val previewAge = editAgeStr.toIntOrNull() ?: userProfile.age
+        val previewBmr = when (editGender) {
+            Gender.MALE -> (10.0 * previewWeight) + (6.25 * previewHeight) - (5.0 * previewAge) + 5.0
+            Gender.FEMALE -> (10.0 * previewWeight) + (6.25 * previewHeight) - (5.0 * previewAge) - 161.0
+            Gender.NOT_SPECIFIED -> (10.0 * previewWeight) + (6.25 * previewHeight) - (5.0 * previewAge) - 78.0
+        }
 
         AlertDialog(
             onDismissRequest = { showProfileDialog = false },
             containerColor = colors.surface,
             title = {
-                Text("Editar Perfil", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("Editar Perfil & Antropometria", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -620,6 +632,33 @@ fun SettingsScreen(
                             unfocusedTextColor = colors.textPrimary
                         )
                     )
+
+                    // Seletor de Sexo para cálculo do BMR
+                    Text("Sexo biológico (para cálculo basal Mifflin-St Jeor):", color = colors.textSecondary, fontSize = 11.sp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(Gender.MALE, Gender.FEMALE).forEach { g ->
+                            val isSel = editGender == g
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSel) colors.primary else colors.surfaceVariant)
+                                    .clickable { editGender = g }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = g.displayName,
+                                    color = if (isSel) colors.onPrimary else colors.textPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
@@ -661,6 +700,21 @@ fun SettingsScreen(
                             unfocusedTextColor = colors.textPrimary
                         )
                     )
+
+                    // Estimativa live do BMR
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(colors.surfaceVariant.copy(alpha = 0.5f))
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = "Gasto Basal Estimado (Mifflin-St Jeor): ~${previewBmr.toInt()} kcal/dia",
+                            color = colors.textSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
                 }
             },
             confirmButton = {
@@ -674,7 +728,8 @@ fun SettingsScreen(
                             name = if (editName.isNotBlank()) editName else userProfile.name,
                             age = newAge,
                             heightCm = newHeight,
-                            weightKg = newWeight
+                            weightKg = newWeight,
+                            gender = editGender
                         )
                         onUpdateProfile(updated)
                         showProfileDialog = false
@@ -698,6 +753,7 @@ fun SettingsScreen(
         var editCaloriesStr by remember { mutableStateOf(userProfile.goals.dailyCalories.toString()) }
         var editSleepStr by remember { mutableStateOf(userProfile.goals.sleepHours.toString()) }
         var editWorkoutsStr by remember { mutableStateOf(userProfile.goals.weeklyWorkoutDays.toString()) }
+        var editGoalMode by remember { mutableStateOf(userProfile.goals.calorieGoalMode) }
 
         AlertDialog(
             onDismissRequest = { showGoalsDialog = false },
@@ -707,10 +763,44 @@ fun SettingsScreen(
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Modalidade da meta calórica
+                    Text("Modalidade da Meta Calórica:", color = colors.textSecondary, fontSize = 11.sp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CalorieGoalMode.values().forEach { mode ->
+                            val isSel = editGoalMode == mode
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSel) colors.primary else colors.surfaceVariant)
+                                    .clickable { editGoalMode = mode }
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = mode.shortLabel,
+                                    color = if (isSel) colors.onPrimary else colors.textPrimary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+
                     OutlinedTextField(
-                        value = editStepsStr,
-                        onValueChange = { editStepsStr = it.filter { c -> c.isDigit() } },
-                        label = { Text("Meta Diária de Passos") },
+                        value = editCaloriesStr,
+                        onValueChange = { editCaloriesStr = it.filter { c -> c.isDigit() } },
+                        label = {
+                            Text(
+                                if (editGoalMode == CalorieGoalMode.ACTIVE_CALORIES)
+                                    "Meta de Calorias Ativas (kcal)"
+                                else
+                                    "Meta de Gasto Total Diário (kcal)"
+                            )
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = colors.primary,
@@ -721,9 +811,9 @@ fun SettingsScreen(
                     )
 
                     OutlinedTextField(
-                        value = editCaloriesStr,
-                        onValueChange = { editCaloriesStr = it.filter { c -> c.isDigit() } },
-                        label = { Text("Meta de Calorias Ativas (kcal)") },
+                        value = editStepsStr,
+                        onValueChange = { editStepsStr = it.filter { c -> c.isDigit() } },
+                        label = { Text("Meta Diária de Passos") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = colors.primary,
@@ -760,6 +850,13 @@ fun SettingsScreen(
                             )
                         )
                     }
+
+                    Text(
+                        text = "• Gasto Basal: energia em repouso\n• Calorias Ativas: queima em movimento\n• Gasto Total: basal + calorias ativas",
+                        color = colors.textSecondary,
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp
+                    )
                 }
             },
             confirmButton = {
@@ -774,6 +871,7 @@ fun SettingsScreen(
                             goals = UserGoals(
                                 dailySteps = newSteps,
                                 dailyCalories = newCalories,
+                                calorieGoalMode = editGoalMode,
                                 sleepHours = newSleep,
                                 weeklyWorkoutDays = newWorkouts
                             )
@@ -794,13 +892,13 @@ fun SettingsScreen(
         )
     }
 
-    // ----------------- DIALOG 3: CONNECTED DEVICES -----------------
+    // ----------------- DIALOG 3: CONNECTED DEVICES & ORIGIN PRIORITY -----------------
     if (showDevicesDialog) {
         AlertDialog(
             onDismissRequest = { showDevicesDialog = false },
             containerColor = colors.surface,
             title = {
-                Text("Dispositivos Conectados", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("Dispositivos & Sensores", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -821,14 +919,14 @@ fun SettingsScreen(
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                "Centralizador oficial de saúde do Android. Coleta passos, batimentos, repouso, sono real e treinos.",
+                                "Centralizador de saúde do Android. O VITAL lê os dados diretamente daqui, sem necessidade de servidores intermediários.",
                                 color = colors.textSecondary,
                                 fontSize = 11.sp
                             )
                         }
                     }
 
-                    // Item Zepp / Amazfit
+                    // Item Prioridade de Origens
                     Card(
                         colors = CardDefaults.cardColors(containerColor = colors.surfaceVariant),
                         shape = RoundedCornerShape(16.dp),
@@ -840,12 +938,12 @@ fun SettingsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Amazfit / Zepp OS", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text("INTEGRADO", color = colors.primary, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                                Text("Prioridade de Origens dos Dados", color = colors.textPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("CONFIGURADO", color = colors.primary, fontWeight = FontWeight.Bold, fontSize = 10.sp)
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                "Como sincronizar sua pulseira Amazfit:\n1. Abra o aplicativo Zepp no seu celular\n2. Vá em Perfil > Adicionar Contas > Health Connect\n3. Conceda todas as permissões para o VITAL visualizar tudo automaticamente sem dados falsos.",
+                                "1. Zepp / Huami (com.huami.watch.hmwatchmanager) — Fonte prioritária direta do relógio Amazfit.\n2. Google Fit (com.google.android.apps.fitness) — Fonte alternativa apenas se Huami não tiver dados.\n\nProteção contra soma dupla: Registros duplicados entre o relógio e o Google Fit não são combinados nem somados.",
                                 color = colors.textSecondary,
                                 fontSize = 11.sp,
                                 lineHeight = 16.sp

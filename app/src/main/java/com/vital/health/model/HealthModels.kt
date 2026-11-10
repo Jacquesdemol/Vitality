@@ -43,7 +43,8 @@ data class NightSleepSummary(
     val formattedBedtime: String,
     val formattedWakeTime: String,
     val qualityAssessment: String,
-    val comparisonWithWeeklyAvgMinutes: Long
+    val comparisonWithWeeklyAvgMinutes: Long,
+    val sourceOrigin: String = "Health Connect"
 )
 
 data class ExerciseSessionData(
@@ -70,7 +71,8 @@ data class DayActivitySummary(
     val totalDistanceKm: Double,
     val exerciseSessions: List<ExerciseSessionData>,
     val hasActivity: Boolean,
-    val intensityScore: Float // 0f..1f for visual bar height
+    val intensityScore: Float, // 0f..1f for visual bar height
+    val sourceOrigin: String = "Health Connect"
 )
 
 data class DayDistanceSummary(
@@ -85,7 +87,8 @@ data class WeeklyDistanceSummary(
     val endDate: LocalDate,
     val days: List<DayDistanceSummary>,
     val totalWeeklyKm: Double,
-    val dailyAverageKm: Double
+    val dailyAverageKm: Double,
+    val sourceOrigin: String = "Health Connect"
 )
 
 data class StreakData(
@@ -95,6 +98,29 @@ data class StreakData(
     val weeklyGoalDays: Int,
     val streakMessage: String,
     val isGoalMet: Boolean
+)
+
+data class BasalEnergyData(
+    val bmrKcal: Double,
+    val sourceOrigin: String,
+    val isEstimated: Boolean,
+    val measurementDate: Instant? = null
+)
+
+data class EnergyBalanceSummary(
+    val date: LocalDate,
+    val basalCaloriesKcal: Double,
+    val activeCaloriesKcal: Double,
+    val totalEnergyKcal: Double,
+    val goalKcal: Int,
+    val goalMode: String, // "Ativas" ou "Total"
+    val remainingToGoalKcal: Double,
+    val diffFromGoalKcal: Double,
+    val isGoalMet: Boolean,
+    val fatGramsEquivalence: Double, // ± gramas de gordura (diferença / 7.7)
+    val bmrSource: String,
+    val isBmrEstimated: Boolean,
+    val activeCaloriesSource: String
 )
 
 enum class HealthSyncStatus {

@@ -23,14 +23,17 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vital.health.data.CalorieGoalMode
 import com.vital.health.data.UserProfile
 import com.vital.health.healthconnect.LiveHealthData
 import com.vital.health.insights.DailyInsightEngine
+import com.vital.health.model.DayActivitySummary
 import com.vital.health.model.HealthSyncStatus
 import com.vital.health.model.StreakData
 import com.vital.health.model.WeeklyDistanceSummary
 import com.vital.health.theme.VitalTheme
 import java.time.LocalDate
+import java.util.Locale
 
 @Composable
 fun HomeScreen(
@@ -38,6 +41,7 @@ fun HomeScreen(
     liveData: LiveHealthData,
     streakData: StreakData,
     weeklyDistance: WeeklyDistanceSummary?,
+    weeklyActivity: List<DayActivitySummary> = emptyList(),
     syncStatus: HealthSyncStatus = HealthSyncStatus.CONNECTED,
     isSyncing: Boolean = false,
     onSync: () -> Unit = {},
@@ -57,7 +61,12 @@ fun HomeScreen(
     val weightKg = liveData.weightKg ?: userProfile.weightKg
     val bmi = userProfile.bmi
 
+    // Gasto Basal (BMR) e Balanço
+    val bmrKcal = liveData.bmrKcal ?: userProfile.estimatedBmrMifflinStJeor ?: 1650.0
+    val totalEnergyKcal = liveData.totalEnergyKcal.coerceAtLeast(bmrKcal + activeCalories)
+
     var showDistanceDialog by remember { mutableStateOf(false) }
+    var isWeeklyBalanceView by remember { mutableStateOf(false) }
 
     val insights = DailyInsightEngine.generate(
         currentSteps = currentSteps,
@@ -265,7 +274,6 @@ fun HomeScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Progress bar for the weekly goal
                     val progressRatio = (streakData.activeDaysThisWeek.toFloat() / streakData.weeklyGoalDays.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
                     Box(
                         modifier = Modifier
@@ -295,7 +303,7 @@ fun HomeScreen(
             }
         }
 
-        // Widget 1: Batimentos Cardíacos (com repouso diferenciado)
+        // Widget 1: Batimentos Cardíacos (com badge de origem)
         item {
             Card(
                 shape = RoundedCornerShape(28.dp),
@@ -325,11 +333,7 @@ fun HomeScreen(
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
-                        Text(
-                            text = if (currentBpm != null) "Health Connect" else "Sem leitura recente",
-                            color = colors.textSecondary,
-                            fontSize = 11.sp
-                        )
+                        OriginBadge(origin = liveData.heartRateOrigin)
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -356,9 +360,9 @@ fun HomeScreen(
                                 )
                             }
                             Text(
-                                text = if (restingBpm != null) "Repouso: $restingBpm bpm • Leitura oficial"
-                                       else if (currentBpm != null) "Normal • 52–100 bpm"
-                                       else "Sincronize a pulseira Zepp / Amazfit",
+                                text = if (restingBpm != null) "Repouso: $restingBpm bpm • Fonte: ${liveData.restingHeartRateOrigin}"
+                                       else if (currentBpm != null) "Faixa normal: 52–100 bpm"
+                                       else "Sem leituras nas últimas 24h",
                                 color = colors.textSecondary,
                                 fontSize = 12.sp
                             )
@@ -395,7 +399,7 @@ fun HomeScreen(
             }
         }
 
-        // Widget 2 & 3: Calorias & Passos
+        // Widget 2 & 3: Calorias & Passos (com badges de origem)
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -410,19 +414,26 @@ fun HomeScreen(
                         .border(1.dp, colors.cardBorder, RoundedCornerShape(26.dp))
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.LocalFireDepartment,
-                                contentDescription = null,
-                                tint = colors.textSecondary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Calorias Ativas",
-                                color = colors.textSecondary,
-                                fontSize = 12.sp
-                            )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.LocalFireDepartment,
+                                    contentDescription = null,
+                                    tint = colors.textSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Ativas",
+                                    color = colors.textSecondary,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            OriginBadge(origin = liveData.activeCaloriesOrigin)
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))
@@ -480,19 +491,26 @@ fun HomeScreen(
                         .border(1.dp, colors.cardBorder, RoundedCornerShape(26.dp))
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.DirectionsWalk,
-                                contentDescription = null,
-                                tint = colors.textSecondary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Passos Hoje",
-                                color = colors.textSecondary,
-                                fontSize = 12.sp
-                            )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.DirectionsWalk,
+                                    contentDescription = null,
+                                    tint = colors.textSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Passos",
+                                    color = colors.textSecondary,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            OriginBadge(origin = liveData.stepsOrigin)
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))
@@ -548,6 +566,279 @@ fun HomeScreen(
             }
         }
 
+        // =========================================================================
+        // WIDGET NOVO: BALANÇO ENERGÉTICO & GASTO CALÓRICO BASAL (BMR)
+        // =========================================================================
+        item {
+            val isTotalMode = userProfile.goals.calorieGoalMode == CalorieGoalMode.TOTAL_ENERGY
+            val goalKcal = userProfile.goals.dailyCalories
+
+            // Cálculos diários
+            val dailyBasal = bmrKcal
+            val dailyActive = activeCalories.toDouble()
+            val dailyTotal = dailyBasal + dailyActive
+            val dailyDiff = if (isTotalMode) dailyTotal - goalKcal else dailyActive - goalKcal
+            val dailyRemaining = (-dailyDiff).coerceAtLeast(0.0)
+            val dailyFatEquivalenceGrams = dailyDiff / 7.7 // 7700 kcal por kg de gordura
+
+            // Cálculos semanais acumulados
+            val weeklyActiveKcal = weeklyActivity.sumOf { it.totalCaloriesKcal }
+            val weeklyBasalKcal = dailyBasal * 7.0
+            val weeklyTotalKcal = weeklyBasalKcal + weeklyActiveKcal
+            val weeklyGoalKcal = goalKcal * 7
+            val weeklyDiff = if (isTotalMode) weeklyTotalKcal - weeklyGoalKcal else weeklyActiveKcal - weeklyGoalKcal
+            val weeklyRemaining = (-weeklyDiff).coerceAtLeast(0.0)
+            val weeklyFatEquivalenceGrams = weeklyDiff / 7.7
+
+            Card(
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.surface),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, colors.cardBorder, RoundedCornerShape(28.dp))
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    // Header com toggle Diário / Semanal
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(colors.primary.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Bolt,
+                                    contentDescription = null,
+                                    tint = colors.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Balanço Energético",
+                                    color = colors.textPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (isTotalMode) "Meta: Gasto Energético Total" else "Meta: Calorias Ativas",
+                                    color = colors.textSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        // Toggle Diário / Acumulado Semanal
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(colors.surfaceVariant)
+                                .padding(2.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (!isWeeklyBalanceView) colors.surface else Color.Transparent)
+                                    .clickable { isWeeklyBalanceView = false }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "Hoje",
+                                    color = if (!isWeeklyBalanceView) colors.textPrimary else colors.textSecondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isWeeklyBalanceView) colors.surface else Color.Transparent)
+                                    .clickable { isWeeklyBalanceView = true }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "Semana",
+                                    color = if (isWeeklyBalanceView) colors.textPrimary else colors.textSecondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Três blocos de métricas energéticas
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        // 1. Gasto Basal (BMR)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Metabolismo Basal",
+                                color = colors.textSecondary,
+                                fontSize = 11.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (!isWeeklyBalanceView) "${dailyBasal.toInt()}" else "${weeklyBasalKcal.toInt()}",
+                                color = colors.textPrimary,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (liveData.isBmrEstimated) "Estimativa MSJ" else liveData.bmrOrigin,
+                                color = colors.textSecondary,
+                                fontSize = 10.sp
+                            )
+                        }
+
+                        // 2. Calorias Ativas
+                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Calorias Ativas",
+                                color = colors.textSecondary,
+                                fontSize = 11.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (!isWeeklyBalanceView) "${dailyActive.toInt()}" else "${weeklyActiveKcal.toInt()}",
+                                color = colors.primary,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = liveData.activeCaloriesOrigin,
+                                color = colors.textSecondary,
+                                fontSize = 10.sp
+                            )
+                        }
+
+                        // 3. Gasto Energético Total
+                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "Gasto Total",
+                                color = colors.textSecondary,
+                                fontSize = 11.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (!isWeeklyBalanceView) "${dailyTotal.toInt()} kcal" else "${weeklyTotalKcal.toInt()} kcal",
+                                color = colors.textPrimary,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Basal + Ativas",
+                                color = colors.textSecondary,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Barra de progresso em relação à meta
+                    val currentVal = if (!isWeeklyBalanceView) {
+                        if (isTotalMode) dailyTotal else dailyActive
+                    } else {
+                        if (isTotalMode) weeklyTotalKcal else weeklyActiveKcal
+                    }
+                    val targetVal = if (!isWeeklyBalanceView) goalKcal.toDouble() else weeklyGoalKcal.toDouble()
+                    val balanceProgress = (currentVal / targetVal.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
+
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = if (currentVal >= targetVal) "Meta cumprida!" else "Faltam ${(targetVal - currentVal).toInt()} kcal",
+                                color = if (currentVal >= targetVal) colors.primary else colors.textSecondary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Meta: ${targetVal.toInt()} kcal",
+                                color = colors.textSecondary,
+                                fontSize = 11.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(7.dp)
+                                .clip(CircleShape)
+                                .background(colors.surfaceVariant)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(balanceProgress)
+                                    .fillMaxHeight()
+                                    .clip(CircleShape)
+                                    .background(colors.primary)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Equivalência Energética Teórica em Gordura Corporal
+                    val fatGrams = if (!isWeeklyBalanceView) dailyFatEquivalenceGrams else weeklyFatEquivalenceGrams
+                    val absGrams = Math.abs(fatGrams).toInt()
+                    val isSurplus = fatGrams >= 0
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(colors.surfaceVariant.copy(alpha = 0.5f))
+                            .padding(12.dp)
+                    ) {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = if (isSurplus) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
+                                    contentDescription = null,
+                                    tint = if (isSurplus) colors.primary else Color(0xFFFF9800),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (isSurplus) {
+                                        "Superávit energético de +${fatGrams.toInt()} kcal (~${absGrams}g gordura)"
+                                    } else {
+                                        "Déficit energético de ${fatGrams.toInt()} kcal (~${absGrams}g gordura)"
+                                    },
+                                    color = colors.textPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Aproximação matemática baseada na constante de 7.700 kcal/kg. Não representa alteração física direta de peso corporal.",
+                                color = colors.textSecondary,
+                                fontSize = 10.sp,
+                                lineHeight = 14.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // Widget 4: Distância & Painel Interativo de Km
         item {
             Card(
@@ -579,13 +870,15 @@ fun HomeScreen(
                                 color = colors.textSecondary,
                                 fontSize = 13.sp
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            OriginBadge(origin = liveData.distanceOrigin)
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
 
                         Row(verticalAlignment = Alignment.Bottom) {
                             Text(
-                                text = if (liveData.distanceKm > 0.0) String.format("%.2f", liveData.distanceKm) else "0.0",
+                                text = if (liveData.distanceKm > 0.0) String.format(Locale.getDefault(), "%.2f", liveData.distanceKm) else "0.0",
                                 color = colors.textPrimary,
                                 fontSize = 28.sp,
                                 fontWeight = FontWeight.Bold
@@ -601,7 +894,7 @@ fun HomeScreen(
 
                         if (weeklyDistance != null) {
                             Text(
-                                text = "${String.format("%.1f", weeklyDistance.totalWeeklyKm)} km na semana (Média ${String.format("%.1f", weeklyDistance.dailyAverageKm)} km/dia)",
+                                text = "${String.format(Locale.getDefault(), "%.1f", weeklyDistance.totalWeeklyKm)} km na semana (Média ${String.format(Locale.getDefault(), "%.1f", weeklyDistance.dailyAverageKm)} km/dia)",
                                 color = colors.textSecondary,
                                 fontSize = 11.sp,
                                 modifier = Modifier.padding(top = 2.dp)
@@ -609,7 +902,6 @@ fun HomeScreen(
                         }
                     }
 
-                    // Mini 7-day distance bars
                     if (weeklyDistance != null && weeklyDistance.days.isNotEmpty()) {
                         val maxDist = weeklyDistance.days.maxOfOrNull { it.distanceKm }?.coerceAtLeast(1.0) ?: 1.0
                         Row(
@@ -675,6 +967,8 @@ fun HomeScreen(
                                 color = colors.textSecondary,
                                 fontSize = 13.sp
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            OriginBadge(origin = liveData.sleepOrigin)
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -699,7 +993,7 @@ fun HomeScreen(
 
                     Icon(
                         imageVector = Icons.Default.ChevronRight,
-                        contentDescription = "Ver Sono",
+                        contentDescription = null,
                         tint = colors.textSecondary,
                         modifier = Modifier.size(20.dp)
                     )
@@ -707,193 +1001,91 @@ fun HomeScreen(
             }
         }
 
-        // Widget 6: Composição Corporal & IMC
-        item {
-            Card(
-                shape = RoundedCornerShape(26.dp),
-                colors = CardDefaults.cardColors(containerColor = colors.surface),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, colors.cardBorder, RoundedCornerShape(26.dp))
-            ) {
-                Column(modifier = Modifier.padding(18.dp)) {
-                    Text(
-                        text = "Seu corpo em resumo",
-                        color = colors.textPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
+        // Insight Diário
+        if (primaryInsight != null) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(containerColor = colors.surface),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, colors.cardBorder, RoundedCornerShape(22.dp))
+                ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Row {
-                                Text(text = "Peso: ", color = colors.textSecondary, fontSize = 13.sp)
-                                Text(text = "$weightKg kg", color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            }
-                            Row {
-                                Text(text = "IMC: ", color = colors.textSecondary, fontSize = 13.sp)
-                                Text(text = "$bmi", color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            }
-                            Row {
-                                Text(text = "Gordura: ", color = colors.textSecondary, fontSize = 13.sp)
-                                Text(
-                                    text = if (liveData.bodyFatPct != null) "${liveData.bodyFatPct}%" else "Bioimpedância",
-                                    color = colors.textPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-
-                        // Sparkline de peso
-                        Canvas(modifier = Modifier.size(width = 110.dp, height = 40.dp)) {
-                            val path = Path()
-                            val points = listOf(
-                                Offset(0f, 32f),
-                                Offset(35f, 25f),
-                                Offset(70f, 20f),
-                                Offset(110f, 12f)
-                            )
-                            points.forEachIndexed { i, p ->
-                                if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
-                                drawCircle(color = colors.textPrimary, radius = 3f, center = p)
-                            }
-                            drawPath(
-                                path = path,
-                                color = colors.textPrimary,
-                                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Widget 7: Citação Real Inspiradora & Insight do Dia
-        item {
-            Card(
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = colors.surface),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, colors.cardBorder, RoundedCornerShape(24.dp))
-            ) {
-                Column(modifier = Modifier.padding(18.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
                                 .size(34.dp)
                                 .clip(CircleShape)
-                                .background(colors.surfaceVariant),
+                                .background(colors.primary.copy(alpha = 0.15f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.FormatQuote,
+                                imageVector = Icons.Default.Lightbulb,
                                 contentDescription = null,
-                                tint = colors.textPrimary,
+                                tint = colors.primary,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
 
-                        Spacer(modifier = Modifier.width(10.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
 
                         Column {
                             Text(
-                                text = primaryInsight?.title ?: "Inspiração do Dia",
+                                text = primaryInsight.title,
                                 color = colors.textPrimary,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
-                            if (primaryInsight?.author != null) {
-                                Text(
-                                    text = primaryInsight.author,
-                                    color = colors.textSecondary,
-                                    fontSize = 11.sp
-                                )
-                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = primaryInsight.message,
+                                color = colors.textSecondary,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp
+                            )
                         }
                     }
-
-                    if (primaryInsight?.quote != null) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "\"${primaryInsight.quote}\"",
-                            color = colors.textPrimary,
-                            fontSize = 13.sp,
-                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                            lineHeight = 19.sp
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = primaryInsight?.message ?: "Mantenha o foco e a consistência no seu ritmo de atividade hoje.",
-                        color = colors.textSecondary,
-                        fontSize = 12.sp,
-                        lineHeight = 17.sp
-                    )
                 }
             }
         }
     }
 
-    // Modal / Dialog for Detailed 7-day Distance Chart
+    // Modal de Detalhes de Distância Semanal
     if (showDistanceDialog) {
         AlertDialog(
             onDismissRequest = { showDistanceDialog = false },
             containerColor = colors.surface,
             title = {
                 Text(
-                    text = "Distância percorrida (7 dias)",
+                    text = "Distância Percorrida na Semana",
                     color = colors.textPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
                 )
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (weeklyDistance != null) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column {
-                                Text("Total na semana", color = colors.textSecondary, fontSize = 11.sp)
-                                Text(
-                                    "${String.format("%.2f", weeklyDistance.totalWeeklyKm)} km",
-                                    color = colors.textPrimary,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text("Média diária", color = colors.textSecondary, fontSize = 11.sp)
-                                Text(
-                                    "${String.format("%.2f", weeklyDistance.dailyAverageKm)} km/dia",
-                                    color = colors.textPrimary,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
+                    if (weeklyDistance != null && weeklyDistance.days.isNotEmpty()) {
+                        Text(
+                            text = "Total: ${String.format(Locale.getDefault(), "%.1f", weeklyDistance.totalWeeklyKm)} km • Média diária: ${String.format(Locale.getDefault(), "%.1f", weeklyDistance.dailyAverageKm)} km/dia",
+                            color = colors.textPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
 
                         Spacer(modifier = Modifier.height(4.dp))
 
-                        // Interactive 7-day bar chart
                         val maxD = weeklyDistance.days.maxOfOrNull { it.distanceKm }?.coerceAtLeast(1.0) ?: 1.0
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(120.dp)
-                                .padding(vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
+                                .height(100.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.Bottom
                         ) {
                             weeklyDistance.days.forEach { dayD ->
@@ -904,7 +1096,7 @@ fun HomeScreen(
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Text(
-                                        text = if (dayD.distanceKm > 0) String.format("%.1f", dayD.distanceKm) else "0",
+                                        text = if (dayD.distanceKm > 0) String.format(Locale.getDefault(), "%.1f", dayD.distanceKm) else "0",
                                         color = colors.textSecondary,
                                         fontSize = 10.sp
                                     )
@@ -928,7 +1120,7 @@ fun HomeScreen(
                         }
 
                         Text(
-                            text = "Origem dos dados: Android Health Connect (leitura agregada de sensores e pulseiras conectadas).",
+                            text = "Origem dos registros: ${weeklyDistance.sourceOrigin} (Android Health Connect).",
                             color = colors.textSecondary,
                             fontSize = 11.sp,
                             lineHeight = 16.sp
@@ -950,6 +1142,24 @@ fun HomeScreen(
                     Text("Fechar", fontWeight = FontWeight.Bold)
                 }
             }
+        )
+    }
+}
+
+@Composable
+fun OriginBadge(origin: String) {
+    val colors = VitalTheme.colors
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(colors.surfaceVariant.copy(alpha = 0.7f))
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    ) {
+        Text(
+            text = origin,
+            color = colors.textSecondary,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium
         )
     }
 }

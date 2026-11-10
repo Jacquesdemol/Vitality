@@ -24,8 +24,10 @@ import com.vital.health.healthconnect.LiveHealthData
 import com.vital.health.model.NightSleepSummary
 import com.vital.health.model.SleepStageType
 import com.vital.health.theme.VitalTheme
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
 @Composable
@@ -40,11 +42,18 @@ fun SleepScreen(
     val colors = VitalTheme.colors
     val today = LocalDate.now()
 
-    // Seleção vinculada estritamente à DATA real (LocalDate), chaveada na semana e dados carregados
-    var selectedDate by remember(currentWeekOffset, weeklySleep.firstOrNull()?.date) {
-        val todayInWeek = weeklySleep.find { it.date == today }?.date
-        val initial = todayInWeek ?: weeklySleep.lastOrNull()?.date ?: today.plusWeeks(currentWeekOffset)
+    // Seleção vinculada estritamente à DATA real (LocalDate)
+    var selectedDate by remember(currentWeekOffset) {
+        val initial = if (currentWeekOffset == 0L) today else today.plusWeeks(currentWeekOffset).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
         mutableStateOf(initial)
+    }
+
+    LaunchedEffect(currentWeekOffset) {
+        if (currentWeekOffset == 0L) {
+            selectedDate = today
+        } else {
+            selectedDate = today.plusWeeks(currentWeekOffset).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        }
     }
 
     // Busca o resumo da noite EXATAMENTE pela data selecionada
@@ -336,18 +345,33 @@ fun SleepScreen(
                         }
 
                         if (hasSleepData && selectedNight != null) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(colors.surfaceVariant)
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = selectedNight.qualityAssessment,
-                                    color = colors.textPrimary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(colors.surfaceVariant.copy(alpha = 0.7f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = selectedNight.sourceOrigin,
+                                        color = colors.textSecondary,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(colors.surfaceVariant)
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = selectedNight.qualityAssessment,
+                                        color = colors.textPrimary,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
                             }
                         }
                     }

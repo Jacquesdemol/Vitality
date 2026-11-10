@@ -5,6 +5,8 @@
 
 export type TabType = 'sleep' | 'exercise' | 'home' | 'settings';
 
+export type CalorieGoalMode = 'active' | 'total';
+
 export interface UserProfile {
   name: string;
   age: number;
@@ -14,6 +16,7 @@ export interface UserProfile {
   goals: {
     dailySteps: number;
     activeCalories: number;
+    calorieGoalMode?: CalorieGoalMode;
     sleepMinutes: number;
     weeklyWorkouts: number;
     targetWeightKg?: number;
@@ -59,6 +62,27 @@ export interface CaloriesData {
   comparisonLastWeekPct: number;
   lastUpdated: string;
   source: string;
+}
+
+export interface EnergyBalanceData {
+  bmrKcal: number;
+  bmrSource: string;
+  isBmrEstimated: boolean;
+  activeKcal: number;
+  activeSource: string;
+  totalEnergyKcal: number;
+  calorieGoalMode: CalorieGoalMode;
+  goalKcal: number;
+  remainingKcal: number;
+  diffKcal: number;
+  isGoalMet: boolean;
+  fatEquivalenceGrams: number;
+  weeklyActiveKcal: number;
+  weeklyBasalKcal: number;
+  weeklyTotalKcal: number;
+  weeklyGoalKcal: number;
+  weeklyDiffKcal: number;
+  weeklyFatEquivalenceGrams: number;
 }
 
 export type ExerciseCategory =

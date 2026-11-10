@@ -25,8 +25,10 @@ import com.vital.health.model.DayActivitySummary
 import com.vital.health.model.ExerciseSessionData
 import com.vital.health.model.StreakData
 import com.vital.health.theme.VitalTheme
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
 @Composable
@@ -42,11 +44,18 @@ fun ExerciseScreen(
     val colors = VitalTheme.colors
     val today = LocalDate.now()
 
-    // Seleção vinculada estritamente à DATA real (LocalDate), com recálculo chaveado na semana exibida
-    var selectedDate by remember(currentWeekOffset, weeklyActivity.firstOrNull()?.date) {
-        val todayInWeek = weeklyActivity.find { it.date == today }?.date
-        val initial = todayInWeek ?: weeklyActivity.lastOrNull()?.date ?: today.plusWeeks(currentWeekOffset)
+    // Seleção vinculada estritamente à DATA real (LocalDate)
+    var selectedDate by remember(currentWeekOffset) {
+        val initial = if (currentWeekOffset == 0L) today else today.plusWeeks(currentWeekOffset).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
         mutableStateOf(initial)
+    }
+
+    LaunchedEffect(currentWeekOffset) {
+        if (currentWeekOffset == 0L) {
+            selectedDate = today
+        } else {
+            selectedDate = today.plusWeeks(currentWeekOffset).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        }
     }
 
     // Busca os dados do dia EXATAMENTE pela data selecionada, evitando retenção de dados de dias anteriores

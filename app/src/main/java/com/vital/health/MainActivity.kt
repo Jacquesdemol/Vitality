@@ -164,7 +164,7 @@ class MainActivity : ComponentActivity() {
 
                         try {
                             syncStatus = repository.checkSyncStatus()
-                            val data = repository.fetchAllLiveHealthData(forceRefresh = forceRefresh, component = "MainActivity")
+                            val data = repository.fetchAllLiveHealthData(forceRefresh = forceRefresh, userProfile = userProfile, component = "MainActivity")
                             liveHealthData = data
 
                             streakData = repository.calculateStreak(userProfile.goals.weeklyWorkoutDays, "MainActivity")
@@ -200,18 +200,14 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Navegação de semana na tela de atividades
+                // Navegação de semana na tela de atividades (recarrega para qualquer offset, inclusive retorno à semana 0)
                 LaunchedEffect(currentActivityWeekOffset) {
-                    if (currentActivityWeekOffset != 0L) {
-                        loadWeeklyActivityData(currentActivityWeekOffset)
-                    }
+                    loadWeeklyActivityData(currentActivityWeekOffset)
                 }
 
-                // Navegação de semana na tela de sono
+                // Navegação de semana na tela de sono (recarrega para qualquer offset, inclusive retorno à semana 0)
                 LaunchedEffect(currentSleepWeekOffset) {
-                    if (currentSleepWeekOffset != 0L) {
-                        loadWeeklySleepData(currentSleepWeekOffset)
-                    }
+                    loadWeeklySleepData(currentSleepWeekOffset)
                 }
 
                 onPermissionsResultCallback = {
@@ -267,6 +263,7 @@ class MainActivity : ComponentActivity() {
                                         liveData = liveHealthData,
                                         streakData = streakData,
                                         weeklyDistance = weeklyDistance,
+                                        weeklyActivity = weeklyActivity,
                                         syncStatus = syncStatus,
                                         isSyncing = isSyncing,
                                         onSync = { syncAllHealthData(forceRefresh = true, reason = "USER_CLICKED_SYNC") },

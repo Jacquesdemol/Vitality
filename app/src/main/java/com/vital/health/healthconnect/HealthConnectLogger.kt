@@ -4,13 +4,15 @@ import android.util.Log
 import com.vital.health.util.AppLifecycleTracker
 import kotlinx.coroutines.Job
 import java.time.Instant
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.CoroutineContext
 
 /**
  * HealthConnectLogger - Instrumentação oficial exigida na auditoria com a tag VITAL_HC_DEBUG.
- * Registra ciclo de vida, duração, identificador único, job, cancelamentos e estado do app.
+ * Registra ciclo de vida, duração, identificador único, job, cancelamentos, estado do app,
+ * prioridade de origens (Huami vs Google Fit) e sincronia de datas.
  */
 object HealthConnectLogger {
 
@@ -100,6 +102,29 @@ object HealthConnectLogger {
         )
     }
 
+    /**
+     * Log de Resolução de Origens (Huami vs Google Fit) sem soma duplicada
+     */
+    fun logOriginResolution(
+        metric: String,
+        selectedDate: LocalDate,
+        intervalExact: String,
+        huamiCount: Int,
+        googleFitCount: Int,
+        chosenOrigin: String,
+        isFromCache: Boolean,
+        diagnosticNote: String = ""
+    ) {
+        Log.d(
+            TAG,
+            "[ORIGEM_RESOLUÇÃO] Métrica: $metric | DataAtual: ${LocalDate.now()} | " +
+                    "DiaSelecionado: $selectedDate | Intervalo: $intervalExact | " +
+                    "HuamiRegistros: $huamiCount | GoogleFitRegistros: $googleFitCount | " +
+                    "OrigemUtilizada: $chosenOrigin | Fonte: ${if (isFromCache) "CACHE_MEMÓRIA" else "NOVA_CONSULTA"} | " +
+                    diagnosticNote
+        )
+    }
+
     fun logDaySelection(
         component: String,
         selectedDate: String,
@@ -108,8 +133,8 @@ object HealthConnectLogger {
     ) {
         Log.d(
             TAG,
-            "[NAVEGAÇÃO_DIA] Comp: $component | DataSelecionada: $selectedDate | " +
-                    "Intervalo: $dateRange | RegistrosRetornados: $recordsCount | " +
+            "[NAVEGAÇÃO_DIA] Comp: $component | DataAtual: ${LocalDate.now()} | DataSelecionada: $selectedDate | " +
+                    "IntervaloExato: $dateRange | RegistrosRetornados: $recordsCount | " +
                     "App: ${AppLifecycleTracker.stateLabel}"
         )
     }
@@ -122,8 +147,8 @@ object HealthConnectLogger {
     ) {
         Log.d(
             TAG,
-            "[NAVEGAÇÃO_SEMANA] Comp: $component | Offset: $weekOffset | " +
-                    "De: $weekStartDate até $weekEndDate | App: ${AppLifecycleTracker.stateLabel}"
+            "[NAVEGAÇÃO_SEMANA] Comp: $component | DataAtual: ${LocalDate.now()} | Offset: $weekOffset | " +
+                    "SemanaExibida: $weekStartDate até $weekEndDate | App: ${AppLifecycleTracker.stateLabel}"
         )
     }
 }

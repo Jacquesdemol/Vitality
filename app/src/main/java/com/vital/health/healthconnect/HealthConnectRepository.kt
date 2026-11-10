@@ -4,9 +4,11 @@ import android.content.Context
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.*
+import androidx.health.connect.client.records.metadata.DataOrigin
 import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
+import com.vital.health.data.UserProfile
 import com.vital.health.data.local.HealthMetricEntity
 import com.vital.health.data.local.VitalDatabase
 import com.vital.health.model.*
@@ -27,17 +29,35 @@ import java.util.Locale
 
 /**
  * HealthConnectRepository - Camada de integração com o Android Health Connect SDK
- * Cumpre os requisitos estritos da auditoria e correção do ciclo de vida:
- * 1. Não executa consultas enquanto o aplicativo estiver em segundo plano (evita erro READ_HEALTH_DATA_IN_BACKGROUND).
- * 2. Em caso de SecurityException (permissão ausente ou negada), aborta imediatamente o loop sem retries infinitos.
- * 3. Otimiza o cálculo de ofensiva (calculateStreak), eliminando até centenas de agregações desnecessárias.
- * 4. Instrumentação completa com a tag VITAL_HC_DEBUG contendo ID único, horários, estado do app, registros e exceções.
- * 5. Reutiliza cache em memória e serializa consultas simultâneas via Mutex.
+ * Cumpre os requisitos estritos:
+ * 1. Priorização de origens: Zepp/Huami ("com.huami.watch.hmwatchmanager") prioritário;
+ *    Google Fit ("com.google.android.apps.fitness") secundário como alternativa;
+ *    sem somar registros duplicados entre as fontes.
+ * 2. Ciclo de vida estrito: não executa consultas em background; aborta rápido em SecurityException.
+ * 3. Leitura e cálculo de Gasto Basal (BMR) via BasalMetabolicRateRecord ou fórmula Mifflin-St Jeor.
+ * 4. Cálculo de Gasto Energético Total (Basal + Ativas) sem contagem duplicada.
+ * 5. Navegação e consultas por data exata (LocalDate) com fusos horários locais.
+ * 6. Logs de diagnóstico VITAL_HC_DEBUG registrando origens, contagens e conflitos.
  */
 class HealthConnectRepository(
     private val context: Context,
     private val database: VitalDatabase
 ) {
+
+    companion object {
+        const val ORIGIN_HUAMI = "com.huami.watch.hmwatchmanager"
+        const val ORIGIN_GOOGLE_FIT = "com.google.android.apps.fitness"
+
+        fun formatOriginDisplayName(packageName: String): String {
+            return when {
+                packageName.contains("huami", ignoreCase = true) || packageName.contains("hmwatchmanager", ignoreCase = true) -> "Zepp (Huami)"
+                packageName.contains("fitness", ignoreCase = true) || packageName.contains("google", ignoreCase = true) -> "Google Fit"
+                packageName.contains("samsung", ignoreCase = true) -> "Samsung Health"
+                packageName.isNotBlank() -> packageName.substringAfterLast('.')
+                else -> "Health Connect"
+            }
+        }
+    }
 
     val healthConnectClient: HealthConnectClient? by lazy {
         if (HealthConnectClient.getSdkStatus(context) == HealthConnectClient.SDK_AVAILABLE) {
@@ -58,6 +78,7 @@ class HealthConnectRepository(
         HealthPermission.getReadPermission(DistanceRecord::class),
         HealthPermission.getReadPermission(WeightRecord::class),
         HealthPermission.getReadPermission(BodyFatRecord::class),
+        HealthPermission.getReadPermission(BasalMetabolicRateRecord::class),
         HealthPermission.getReadPermission(OxygenSaturationRecord::class),
         HealthPermission.getReadPermission(RespiratoryRateRecord::class),
         HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class),
@@ -116,17 +137,21 @@ class HealthConnectRepository(
         return HealthSyncStatus.CONNECTED
     }
 
-    // ------------------- PASSOS REAIS -------------------
+    // ------------------- PASSOS REAIS COM PRIORIDADE HUAMI > GOOGLE FIT -------------------
 
-    suspend fun readTodaySteps(component: String = "HomeScreen"): Long {
-        return readStepsForDate(LocalDate.now(), component, "READ_TODAY_STEPS")
+    suspend fun readTodaySteps(component: String = "HomeScreen"): Pair<Long, String> {
+        return readStepsForDateWithOrigin(LocalDate.now(), component, "READ_TODAY_STEPS")
     }
 
-    suspend fun readStepsForDate(date: LocalDate, component: String = "Repository", reason: String = "DATE_QUERY"): Long {
-        val client = healthConnectClient ?: return 0L
+    suspend fun readStepsForDateWithOrigin(
+        date: LocalDate,
+        component: String = "Repository",
+        reason: String = "DATE_QUERY"
+    ): Pair<Long, String> {
+        val client = healthConnectClient ?: return Pair(0L, "Health Connect")
         if (!AppLifecycleTracker.isForeground) {
             HealthConnectLogger.logQueryCancelled("SKIP", "StepsRecord", component, 0, "AppInBackground")
-            return 0L
+            return Pair(0L, "Health Connect")
         }
 
         val qId = HealthConnectLogger.nextQueryId("STEPS")
@@ -135,51 +160,112 @@ class HealthConnectRepository(
         val zone = ZoneId.systemDefault()
         val startTime = date.atStartOfDay(zone).toInstant()
         val endTime = date.plusDays(1).atStartOfDay(zone).toInstant()
+        val intervalStr = "$startTime a $endTime"
 
         HealthConnectLogger.logQueryStart(qId, "StepsRecord", component, reason, coroutineCtx)
 
         return try {
-            val response = client.aggregate(
+            // 1. Tenta prioritariamente a origem Zepp / Huami (relógio)
+            val huamiResponse = try {
+                client.aggregate(
+                    AggregateRequest(
+                        metrics = setOf(StepsRecord.COUNT_TOTAL),
+                        timeRangeFilter = TimeRangeFilter.between(startTime, endTime),
+                        dataOriginFilter = setOf(DataOrigin(ORIGIN_HUAMI))
+                    )
+                )
+            } catch (_: Exception) { null }
+
+            val huamiSteps = huamiResponse?.get(StepsRecord.COUNT_TOTAL) ?: 0L
+
+            if (huamiSteps > 0L) {
+                // Origem Huami encontrada! Usamos Huami como fonte primária sem somar Fit
+                HealthConnectLogger.logOriginResolution(
+                    metric = "Passos",
+                    selectedDate = date,
+                    intervalExact = intervalStr,
+                    huamiCount = 1,
+                    googleFitCount = 0,
+                    chosenOrigin = "Zepp (Huami)",
+                    isFromCache = false,
+                    diagnosticNote = "Huami prioritário utilizado ($huamiSteps passos)"
+                )
+                val duration = System.currentTimeMillis() - startMs
+                HealthConnectLogger.logQuerySuccess(qId, "StepsRecord", component, duration, 1, coroutineCtx)
+
+                if (date == LocalDate.now()) {
+                    database.healthDao().insertMetric(
+                        HealthMetricEntity(
+                            metricType = "steps",
+                            value = huamiSteps.toDouble(),
+                            unit = "steps",
+                            source = "Zepp (Huami)",
+                            timestamp = Instant.now().toEpochMilli()
+                        )
+                    )
+                }
+                return Pair(huamiSteps, "Zepp (Huami)")
+            }
+
+            // 2. Se Huami não tem registros, busca alternativa no Google Fit
+            val fitResponse = try {
+                client.aggregate(
+                    AggregateRequest(
+                        metrics = setOf(StepsRecord.COUNT_TOTAL),
+                        timeRangeFilter = TimeRangeFilter.between(startTime, endTime),
+                        dataOriginFilter = setOf(DataOrigin(ORIGIN_GOOGLE_FIT))
+                    )
+                )
+            } catch (_: Exception) { null }
+
+            val fitSteps = fitResponse?.get(StepsRecord.COUNT_TOTAL) ?: 0L
+
+            if (fitSteps > 0L) {
+                HealthConnectLogger.logOriginResolution(
+                    metric = "Passos",
+                    selectedDate = date,
+                    intervalExact = intervalStr,
+                    huamiCount = 0,
+                    googleFitCount = 1,
+                    chosenOrigin = "Google Fit",
+                    isFromCache = false,
+                    diagnosticNote = "Fallback para Google Fit ($fitSteps passos)"
+                )
+                val duration = System.currentTimeMillis() - startMs
+                HealthConnectLogger.logQuerySuccess(qId, "StepsRecord", component, duration, 1, coroutineCtx)
+                return Pair(fitSteps, "Google Fit")
+            }
+
+            // 3. Fallback geral sem filtro de origem
+            val generalResponse = client.aggregate(
                 AggregateRequest(
                     metrics = setOf(StepsRecord.COUNT_TOTAL),
                     timeRangeFilter = TimeRangeFilter.between(startTime, endTime)
                 )
             )
-            val totalSteps = response[StepsRecord.COUNT_TOTAL] ?: 0L
-            val duration = System.currentTimeMillis() - startMs
-            HealthConnectLogger.logQuerySuccess(qId, "StepsRecord", component, duration, if (totalSteps > 0) 1 else 0, coroutineCtx)
+            val generalSteps = generalResponse[StepsRecord.COUNT_TOTAL] ?: 0L
+            val originLabel = if (generalSteps > 0L) "Health Connect" else "Sem registro"
 
-            if (date == LocalDate.now()) {
-                database.healthDao().insertMetric(
-                    HealthMetricEntity(
-                        metricType = "steps",
-                        value = totalSteps.toDouble(),
-                        unit = "steps",
-                        source = "Health Connect (StepsRecord)",
-                        timestamp = Instant.now().toEpochMilli()
-                    )
-                )
-            }
-            totalSteps
+            val duration = System.currentTimeMillis() - startMs
+            HealthConnectLogger.logQuerySuccess(qId, "StepsRecord", component, duration, if (generalSteps > 0L) 1 else 0, coroutineCtx)
+            Pair(generalSteps, originLabel)
         } catch (ce: CancellationException) {
             HealthConnectLogger.logQueryCancelled(qId, "StepsRecord", component, System.currentTimeMillis() - startMs, "CancelledByLifecycle", coroutineCtx)
             throw ce
         } catch (e: Exception) {
             val duration = System.currentTimeMillis() - startMs
             HealthConnectLogger.logQueryError(qId, "StepsRecord", component, duration, e, 1, coroutineCtx)
-            if (date == LocalDate.now()) {
-                database.healthDao().getLatestMetric("steps")?.value?.toLong() ?: 0L
-            } else 0L
+            Pair(0L, "Health Connect")
         }
     }
 
-    // ------------------- DISTÂNCIA REAL -------------------
+    // ------------------- DISTÂNCIA REAL COM PRIORIDADE HUAMI > GOOGLE FIT -------------------
 
-    suspend fun readDailyDistanceKm(date: LocalDate, component: String = "Repository"): Double {
-        val client = healthConnectClient ?: return 0.0
+    suspend fun readDailyDistanceKmWithOrigin(date: LocalDate, component: String = "Repository"): Pair<Double, String> {
+        val client = healthConnectClient ?: return Pair(0.0, "Health Connect")
         if (!AppLifecycleTracker.isForeground) {
             HealthConnectLogger.logQueryCancelled("SKIP", "DistanceRecord", component, 0, "AppInBackground")
-            return 0.0
+            return Pair(0.0, "Health Connect")
         }
 
         val qId = HealthConnectLogger.nextQueryId("DIST")
@@ -188,33 +274,96 @@ class HealthConnectRepository(
         val zone = ZoneId.systemDefault()
         val startTime = date.atStartOfDay(zone).toInstant()
         val endTime = date.plusDays(1).atStartOfDay(zone).toInstant()
+        val intervalStr = "$startTime a $endTime"
 
         HealthConnectLogger.logQueryStart(qId, "DistanceRecord", component, "READ_DAILY_DISTANCE", coroutineCtx)
 
         return try {
-            val response = client.aggregate(
+            // 1. Tenta Huami primeiro
+            val huamiResponse = try {
+                client.aggregate(
+                    AggregateRequest(
+                        metrics = setOf(DistanceRecord.DISTANCE_TOTAL),
+                        timeRangeFilter = TimeRangeFilter.between(startTime, endTime),
+                        dataOriginFilter = setOf(DataOrigin(ORIGIN_HUAMI))
+                    )
+                )
+            } catch (_: Exception) { null }
+
+            val huamiDistance = huamiResponse?.get(DistanceRecord.DISTANCE_TOTAL)?.inKilometers ?: 0.0
+
+            if (huamiDistance > 0.0) {
+                HealthConnectLogger.logOriginResolution(
+                    metric = "Distância",
+                    selectedDate = date,
+                    intervalExact = intervalStr,
+                    huamiCount = 1,
+                    googleFitCount = 0,
+                    chosenOrigin = "Zepp (Huami)",
+                    isFromCache = false,
+                    diagnosticNote = "Huami prioritário (${String.format(Locale.US, "%.2f", huamiDistance)} km)"
+                )
+                val duration = System.currentTimeMillis() - startMs
+                HealthConnectLogger.logQuerySuccess(qId, "DistanceRecord", component, duration, 1, coroutineCtx)
+                return Pair(huamiDistance, "Zepp (Huami)")
+            }
+
+            // 2. Tenta Google Fit como alternativa
+            val fitResponse = try {
+                client.aggregate(
+                    AggregateRequest(
+                        metrics = setOf(DistanceRecord.DISTANCE_TOTAL),
+                        timeRangeFilter = TimeRangeFilter.between(startTime, endTime),
+                        dataOriginFilter = setOf(DataOrigin(ORIGIN_GOOGLE_FIT))
+                    )
+                )
+            } catch (_: Exception) { null }
+
+            val fitDistance = fitResponse?.get(DistanceRecord.DISTANCE_TOTAL)?.inKilometers ?: 0.0
+
+            if (fitDistance > 0.0) {
+                HealthConnectLogger.logOriginResolution(
+                    metric = "Distância",
+                    selectedDate = date,
+                    intervalExact = intervalStr,
+                    huamiCount = 0,
+                    googleFitCount = 1,
+                    chosenOrigin = "Google Fit",
+                    isFromCache = false,
+                    diagnosticNote = "Google Fit alternativo (${String.format(Locale.US, "%.2f", fitDistance)} km)"
+                )
+                val duration = System.currentTimeMillis() - startMs
+                HealthConnectLogger.logQuerySuccess(qId, "DistanceRecord", component, duration, 1, coroutineCtx)
+                return Pair(fitDistance, "Google Fit")
+            }
+
+            // 3. Fallback geral
+            val generalResponse = client.aggregate(
                 AggregateRequest(
                     metrics = setOf(DistanceRecord.DISTANCE_TOTAL),
                     timeRangeFilter = TimeRangeFilter.between(startTime, endTime)
                 )
             )
-            val distance = response[DistanceRecord.DISTANCE_TOTAL]?.inKilometers ?: 0.0
+            val generalDistance = generalResponse[DistanceRecord.DISTANCE_TOTAL]?.inKilometers ?: 0.0
+            val originLabel = if (generalDistance > 0.0) "Health Connect" else "Sem registro"
+
             val duration = System.currentTimeMillis() - startMs
-            HealthConnectLogger.logQuerySuccess(qId, "DistanceRecord", component, duration, if (distance > 0.0) 1 else 0, coroutineCtx)
-            distance
+            HealthConnectLogger.logQuerySuccess(qId, "DistanceRecord", component, duration, if (generalDistance > 0.0) 1 else 0, coroutineCtx)
+            Pair(generalDistance, originLabel)
         } catch (ce: CancellationException) {
             HealthConnectLogger.logQueryCancelled(qId, "DistanceRecord", component, System.currentTimeMillis() - startMs, "CancelledByLifecycle", coroutineCtx)
             throw ce
         } catch (e: Exception) {
             val duration = System.currentTimeMillis() - startMs
             HealthConnectLogger.logQueryError(qId, "DistanceRecord", component, duration, e, 1, coroutineCtx)
-            0.0
+            Pair(0.0, "Health Connect")
         }
     }
 
     suspend fun queryWeeklyDistance(weekStartDate: LocalDate, component: String = "HomeScreen"): WeeklyDistanceSummary {
         val daySummaries = mutableListOf<DayDistanceSummary>()
         var permissionErrorEncountered = false
+        var primaryOrigin = "Health Connect"
 
         for (i in 0..6) {
             val date = weekStartDate.plusDays(i.toLong())
@@ -222,21 +371,25 @@ class HealthConnectRepository(
                 .replaceFirstChar { it.uppercase() }
                 .take(3)
 
-            val distance = if (!permissionErrorEncountered && AppLifecycleTracker.isForeground) {
+            val (distance, origin) = if (!permissionErrorEncountered && AppLifecycleTracker.isForeground) {
                 try {
-                    readDailyDistanceKm(date, component)
+                    readDailyDistanceKmWithOrigin(date, component)
                 } catch (e: SecurityException) {
                     permissionErrorEncountered = true
-                    0.0
+                    Pair(0.0, "Sem permissão")
                 }
-            } else 0.0
+            } else Pair(0.0, "Sem registro")
+
+            if (distance > 0 && primaryOrigin == "Health Connect") {
+                primaryOrigin = origin
+            }
 
             daySummaries.add(
                 DayDistanceSummary(
                     date = date,
                     dayOfWeekLabel = dayLabel,
                     distanceKm = distance,
-                    source = if (distance > 0) "Health Connect" else "Sem registro"
+                    source = origin
                 )
             )
         }
@@ -249,21 +402,22 @@ class HealthConnectRepository(
             endDate = weekStartDate.plusDays(6),
             days = daySummaries,
             totalWeeklyKm = total,
-            dailyAverageKm = avg
+            dailyAverageKm = avg,
+            sourceOrigin = primaryOrigin
         )
     }
 
-    // ------------------- CALORIAS ATIVAS REAIS -------------------
+    // ------------------- CALORIAS ATIVAS REAIS COM PRIORIDADE HUAMI > GOOGLE FIT -------------------
 
-    suspend fun readTodayActiveCalories(component: String = "HomeScreen"): Double {
-        return readActiveCaloriesForDate(LocalDate.now(), component)
+    suspend fun readTodayActiveCalories(component: String = "HomeScreen"): Pair<Double, String> {
+        return readActiveCaloriesForDateWithOrigin(LocalDate.now(), component)
     }
 
-    suspend fun readActiveCaloriesForDate(date: LocalDate, component: String = "Repository"): Double {
-        val client = healthConnectClient ?: return 0.0
+    suspend fun readActiveCaloriesForDateWithOrigin(date: LocalDate, component: String = "Repository"): Pair<Double, String> {
+        val client = healthConnectClient ?: return Pair(0.0, "Health Connect")
         if (!AppLifecycleTracker.isForeground) {
             HealthConnectLogger.logQueryCancelled("SKIP", "ActiveCaloriesBurnedRecord", component, 0, "AppInBackground")
-            return 0.0
+            return Pair(0.0, "Health Connect")
         }
 
         val qId = HealthConnectLogger.nextQueryId("CAL")
@@ -272,49 +426,111 @@ class HealthConnectRepository(
         val zone = ZoneId.systemDefault()
         val startTime = date.atStartOfDay(zone).toInstant()
         val endTime = date.plusDays(1).atStartOfDay(zone).toInstant()
+        val intervalStr = "$startTime a $endTime"
 
         HealthConnectLogger.logQueryStart(qId, "ActiveCaloriesBurnedRecord", component, "READ_ACTIVE_CALORIES", coroutineCtx)
 
         return try {
-            val response = client.aggregate(
+            // 1. Tenta Huami primeiro
+            val huamiResponse = try {
+                client.aggregate(
+                    AggregateRequest(
+                        metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
+                        timeRangeFilter = TimeRangeFilter.between(startTime, endTime),
+                        dataOriginFilter = setOf(DataOrigin(ORIGIN_HUAMI))
+                    )
+                )
+            } catch (_: Exception) { null }
+
+            val huamiCalories = huamiResponse?.get(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)?.inKilocalories ?: 0.0
+
+            if (huamiCalories > 0.0) {
+                HealthConnectLogger.logOriginResolution(
+                    metric = "Calorias Ativas",
+                    selectedDate = date,
+                    intervalExact = intervalStr,
+                    huamiCount = 1,
+                    googleFitCount = 0,
+                    chosenOrigin = "Zepp (Huami)",
+                    isFromCache = false,
+                    diagnosticNote = "Huami prioritário (${huamiCalories.toInt()} kcal)"
+                )
+                val duration = System.currentTimeMillis() - startMs
+                HealthConnectLogger.logQuerySuccess(qId, "ActiveCaloriesBurnedRecord", component, duration, 1, coroutineCtx)
+
+                if (date == LocalDate.now()) {
+                    database.healthDao().insertMetric(
+                        HealthMetricEntity(
+                            metricType = "active_calories",
+                            value = huamiCalories,
+                            unit = "kcal",
+                            source = "Zepp (Huami)",
+                            timestamp = Instant.now().toEpochMilli()
+                        )
+                    )
+                }
+                return Pair(huamiCalories, "Zepp (Huami)")
+            }
+
+            // 2. Tenta Google Fit como alternativa
+            val fitResponse = try {
+                client.aggregate(
+                    AggregateRequest(
+                        metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
+                        timeRangeFilter = TimeRangeFilter.between(startTime, endTime),
+                        dataOriginFilter = setOf(DataOrigin(ORIGIN_GOOGLE_FIT))
+                    )
+                )
+            } catch (_: Exception) { null }
+
+            val fitCalories = fitResponse?.get(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)?.inKilocalories ?: 0.0
+
+            if (fitCalories > 0.0) {
+                HealthConnectLogger.logOriginResolution(
+                    metric = "Calorias Ativas",
+                    selectedDate = date,
+                    intervalExact = intervalStr,
+                    huamiCount = 0,
+                    googleFitCount = 1,
+                    chosenOrigin = "Google Fit",
+                    isFromCache = false,
+                    diagnosticNote = "Google Fit alternativo (${fitCalories.toInt()} kcal)"
+                )
+                val duration = System.currentTimeMillis() - startMs
+                HealthConnectLogger.logQuerySuccess(qId, "ActiveCaloriesBurnedRecord", component, duration, 1, coroutineCtx)
+                return Pair(fitCalories, "Google Fit")
+            }
+
+            // 3. Fallback geral
+            val generalResponse = client.aggregate(
                 AggregateRequest(
                     metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
                     timeRangeFilter = TimeRangeFilter.between(startTime, endTime)
                 )
             )
-            val calories = response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories ?: 0.0
-            val duration = System.currentTimeMillis() - startMs
-            HealthConnectLogger.logQuerySuccess(qId, "ActiveCaloriesBurnedRecord", component, duration, if (calories > 0.0) 1 else 0, coroutineCtx)
+            val generalCalories = generalResponse[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories ?: 0.0
+            val originLabel = if (generalCalories > 0.0) "Health Connect" else "Sem registro"
 
-            if (date == LocalDate.now() && calories > 0) {
-                database.healthDao().insertMetric(
-                    HealthMetricEntity(
-                        metricType = "active_calories",
-                        value = calories,
-                        unit = "kcal",
-                        source = "Health Connect",
-                        timestamp = Instant.now().toEpochMilli()
-                    )
-                )
-            }
-            calories
+            val duration = System.currentTimeMillis() - startMs
+            HealthConnectLogger.logQuerySuccess(qId, "ActiveCaloriesBurnedRecord", component, duration, if (generalCalories > 0.0) 1 else 0, coroutineCtx)
+            Pair(generalCalories, originLabel)
         } catch (ce: CancellationException) {
             HealthConnectLogger.logQueryCancelled(qId, "ActiveCaloriesBurnedRecord", component, System.currentTimeMillis() - startMs, "CancelledByLifecycle", coroutineCtx)
             throw ce
         } catch (e: Exception) {
             val duration = System.currentTimeMillis() - startMs
             HealthConnectLogger.logQueryError(qId, "ActiveCaloriesBurnedRecord", component, duration, e, 1, coroutineCtx)
-            0.0
+            Pair(0.0, "Health Connect")
         }
     }
 
-    // ------------------- FREQUÊNCIA CARDÍACA ATUAL VS REPOUSO -------------------
+    // ------------------- FREQUÊNCIA CARDÍACA COM PRIORIDADE HUAMI > GOOGLE FIT -------------------
 
-    suspend fun readLatestHeartRate(component: String = "HomeScreen"): Int? {
-        val client = healthConnectClient ?: return null
+    suspend fun readLatestHeartRateWithOrigin(component: String = "HomeScreen"): Pair<Int?, String> {
+        val client = healthConnectClient ?: return Pair(null, "Health Connect")
         if (!AppLifecycleTracker.isForeground) {
             HealthConnectLogger.logQueryCancelled("SKIP", "HeartRateRecord", component, 0, "AppInBackground")
-            return null
+            return Pair(null, "Health Connect")
         }
 
         val qId = HealthConnectLogger.nextQueryId("HR")
@@ -331,26 +547,50 @@ class HealthConnectRepository(
                     timeRangeFilter = TimeRangeFilter.between(startTime, Instant.now())
                 )
             )
-            val latestSample = response.records.lastOrNull()?.samples?.lastOrNull()
+
+            val huamiRecords = response.records.filter { it.metadata.dataOrigin.packageName == ORIGIN_HUAMI }
+            val fitRecords = response.records.filter { it.metadata.dataOrigin.packageName == ORIGIN_GOOGLE_FIT }
+
+            val chosenRecord = when {
+                huamiRecords.isNotEmpty() -> huamiRecords.last()
+                fitRecords.isNotEmpty() -> fitRecords.last()
+                else -> response.records.lastOrNull()
+            }
+
+            val originLabel = chosenRecord?.let { formatOriginDisplayName(it.metadata.dataOrigin.packageName) } ?: "Health Connect"
+            val latestSample = chosenRecord?.samples?.lastOrNull()
             val bpm = latestSample?.beatsPerMinute?.toInt()
+
+            HealthConnectLogger.logOriginResolution(
+                metric = "Frequência Cardíaca",
+                selectedDate = LocalDate.now(),
+                intervalExact = "$startTime a ${Instant.now()}",
+                huamiCount = huamiRecords.size,
+                googleFitCount = fitRecords.size,
+                chosenOrigin = originLabel,
+                isFromCache = false,
+                diagnosticNote = "Registros totais: ${response.records.size}, BPM lido: $bpm"
+            )
+
             val duration = System.currentTimeMillis() - startMs
             HealthConnectLogger.logQuerySuccess(qId, "HeartRateRecord", component, duration, response.records.size, coroutineCtx)
-            bpm
+            Pair(bpm, originLabel)
         } catch (ce: CancellationException) {
             HealthConnectLogger.logQueryCancelled(qId, "HeartRateRecord", component, System.currentTimeMillis() - startMs, "CancelledByLifecycle", coroutineCtx)
             throw ce
         } catch (e: Exception) {
             val duration = System.currentTimeMillis() - startMs
             HealthConnectLogger.logQueryError(qId, "HeartRateRecord", component, duration, e, 1, coroutineCtx)
-            database.healthDao().getLatestMetric("heart_rate")?.value?.toInt()
+            val cachedBpm = database.healthDao().getLatestMetric("heart_rate")?.value?.toInt()
+            Pair(cachedBpm, "Banco Local")
         }
     }
 
-    suspend fun readLatestRestingHeartRate(component: String = "HomeScreen"): Int? {
-        val client = healthConnectClient ?: return null
+    suspend fun readLatestRestingHeartRateWithOrigin(component: String = "HomeScreen"): Pair<Int?, String> {
+        val client = healthConnectClient ?: return Pair(null, "Health Connect")
         if (!AppLifecycleTracker.isForeground) {
             HealthConnectLogger.logQueryCancelled("SKIP", "RestingHeartRateRecord", component, 0, "AppInBackground")
-            return null
+            return Pair(null, "Health Connect")
         }
 
         val qId = HealthConnectLogger.nextQueryId("RHR")
@@ -367,28 +607,39 @@ class HealthConnectRepository(
                     timeRangeFilter = TimeRangeFilter.between(startTime, Instant.now())
                 )
             )
-            val record = response.records.lastOrNull()
-            val bpm = record?.beatsPerMinute?.toInt()
+
+            val huamiRecords = response.records.filter { it.metadata.dataOrigin.packageName == ORIGIN_HUAMI }
+            val fitRecords = response.records.filter { it.metadata.dataOrigin.packageName == ORIGIN_GOOGLE_FIT }
+
+            val chosenRecord = when {
+                huamiRecords.isNotEmpty() -> huamiRecords.last()
+                fitRecords.isNotEmpty() -> fitRecords.last()
+                else -> response.records.lastOrNull()
+            }
+
+            val originLabel = chosenRecord?.let { formatOriginDisplayName(it.metadata.dataOrigin.packageName) } ?: "Health Connect"
+            val bpm = chosenRecord?.beatsPerMinute?.toInt()
+
             val duration = System.currentTimeMillis() - startMs
             HealthConnectLogger.logQuerySuccess(qId, "RestingHeartRateRecord", component, duration, response.records.size, coroutineCtx)
-            bpm
+            Pair(bpm, originLabel)
         } catch (ce: CancellationException) {
             HealthConnectLogger.logQueryCancelled(qId, "RestingHeartRateRecord", component, System.currentTimeMillis() - startMs, "CancelledByLifecycle", coroutineCtx)
             throw ce
         } catch (e: Exception) {
             val duration = System.currentTimeMillis() - startMs
             HealthConnectLogger.logQueryError(qId, "RestingHeartRateRecord", component, duration, e, 1, coroutineCtx)
-            null
+            Pair(null, "Health Connect")
         }
     }
 
-    // ------------------- SONO REAL & ESTÁGIOS REAIS -------------------
+    // ------------------- SONO REAL & ESTÁGIOS COM PRIORIDADE HUAMI > GOOGLE FIT -------------------
 
-    suspend fun readSleepSessionForNight(nightDate: LocalDate, component: String = "SleepScreen"): SleepSessionData? {
-        val client = healthConnectClient ?: return null
+    suspend fun readSleepSessionForNightWithOrigin(nightDate: LocalDate, component: String = "SleepScreen"): Pair<SleepSessionData?, String> {
+        val client = healthConnectClient ?: return Pair(null, "Health Connect")
         if (!AppLifecycleTracker.isForeground) {
             HealthConnectLogger.logQueryCancelled("SKIP", "SleepSessionRecord", component, 0, "AppInBackground")
-            return null
+            return Pair(null, "Health Connect")
         }
 
         val qId = HealthConnectLogger.nextQueryId("SLEEP")
@@ -397,6 +648,7 @@ class HealthConnectRepository(
         val zone = ZoneId.systemDefault()
         val searchStart = nightDate.minusDays(1).atTime(18, 0).atZone(zone).toInstant()
         val searchEnd = nightDate.atTime(16, 0).atZone(zone).toInstant()
+        val intervalStr = "$searchStart a $searchEnd"
 
         HealthConnectLogger.logQueryStart(qId, "SleepSessionRecord", component, "READ_NIGHT_SLEEP for $nightDate", coroutineCtx)
 
@@ -408,21 +660,40 @@ class HealthConnectRepository(
                 )
             )
 
-            val record = response.records.maxByOrNull {
-                Duration.between(it.startTime, it.endTime).toMinutes()
+            val huamiSessions = response.records.filter { it.metadata.dataOrigin.packageName == ORIGIN_HUAMI }
+            val fitSessions = response.records.filter { it.metadata.dataOrigin.packageName == ORIGIN_GOOGLE_FIT }
+
+            val chosenRecord = when {
+                huamiSessions.isNotEmpty() -> huamiSessions.maxByOrNull { Duration.between(it.startTime, it.endTime).toMinutes() }
+                fitSessions.isNotEmpty() -> fitSessions.maxByOrNull { Duration.between(it.startTime, it.endTime).toMinutes() }
+                else -> response.records.maxByOrNull { Duration.between(it.startTime, it.endTime).toMinutes() }
             }
+
+            val originLabel = chosenRecord?.let { formatOriginDisplayName(it.metadata.dataOrigin.packageName) } ?: "Sem registro"
+
+            HealthConnectLogger.logOriginResolution(
+                metric = "Sessão de Sono",
+                selectedDate = nightDate,
+                intervalExact = intervalStr,
+                huamiCount = huamiSessions.size,
+                googleFitCount = fitSessions.size,
+                chosenOrigin = originLabel,
+                isFromCache = false,
+                diagnosticNote = "Sessão mais relevante selecionada sem somar durações"
+            )
 
             val duration = System.currentTimeMillis() - startMs
             HealthConnectLogger.logQuerySuccess(qId, "SleepSessionRecord", component, duration, response.records.size, coroutineCtx)
 
-            record?.let { mapSleepSessionRecord(it) }
+            val mapped = chosenRecord?.let { mapSleepSessionRecord(it) }
+            Pair(mapped, originLabel)
         } catch (ce: CancellationException) {
             HealthConnectLogger.logQueryCancelled(qId, "SleepSessionRecord", component, System.currentTimeMillis() - startMs, "CancelledByLifecycle", coroutineCtx)
             throw ce
         } catch (e: Exception) {
             val duration = System.currentTimeMillis() - startMs
             HealthConnectLogger.logQueryError(qId, "SleepSessionRecord", component, duration, e, 1, coroutineCtx)
-            null
+            Pair(null, "Health Connect")
         }
     }
 
@@ -431,30 +702,30 @@ class HealthConnectRepository(
         val formatter = DateTimeFormatter.ofPattern("HH:mm")
         val zone = ZoneId.systemDefault()
 
-        val sessions = mutableListOf<SleepSessionData?>()
+        val sessions = mutableListOf<Pair<SleepSessionData?, String>>()
         var permissionDenied = false
 
         for (i in 0..6) {
             val date = weekStartDate.plusDays(i.toLong())
-            val session = if (!permissionDenied && AppLifecycleTracker.isForeground) {
+            val sessionPair = if (!permissionDenied && AppLifecycleTracker.isForeground) {
                 try {
-                    readSleepSessionForNight(date, component)
+                    readSleepSessionForNightWithOrigin(date, component)
                 } catch (e: SecurityException) {
                     permissionDenied = true
-                    null
+                    Pair(null, "Sem permissão")
                 }
-            } else null
-            sessions.add(session)
+            } else Pair(null, "Sem registro")
+            sessions.add(sessionPair)
         }
 
-        val validSessions = sessions.filterNotNull()
+        val validSessions = sessions.mapNotNull { it.first }
         val avgDuration = if (validSessions.isNotEmpty()) {
             validSessions.map { it.totalDurationMinutes }.average().toLong()
         } else 0L
 
         for (i in 0..6) {
             val date = weekStartDate.plusDays(i.toLong())
-            val session = sessions[i]
+            val (session, origin) = sessions[i]
 
             if (session != null && session.totalDurationMinutes > 0L) {
                 val duration = session.totalDurationMinutes
@@ -479,7 +750,8 @@ class HealthConnectRepository(
                         formattedBedtime = bedtimeStr,
                         formattedWakeTime = wakeStr,
                         qualityAssessment = assessment,
-                        comparisonWithWeeklyAvgMinutes = diffAvg
+                        comparisonWithWeeklyAvgMinutes = diffAvg,
+                        sourceOrigin = origin
                     )
                 )
             } else {
@@ -492,7 +764,8 @@ class HealthConnectRepository(
                         formattedBedtime = "--:--",
                         formattedWakeTime = "--:--",
                         qualityAssessment = "Sem registro de sono",
-                        comparisonWithWeeklyAvgMinutes = 0L
+                        comparisonWithWeeklyAvgMinutes = 0L,
+                        sourceOrigin = origin
                     )
                 )
             }
@@ -568,16 +841,12 @@ class HealthConnectRepository(
             remMinutes = remMins,
             awakeMinutes = awakeMins,
             hasStages = hasStages,
-            sourceApp = record.metadata.dataOrigin.packageName
+            sourceApp = formatOriginDisplayName(record.metadata.dataOrigin.packageName)
         )
     }
 
-    // ------------------- EXERCÍCIOS REAIS & SESSÕES -------------------
+    // ------------------- EXERCÍCIOS REAIS COM DEDUPLICAÇÃO HUAMI VS FIT -------------------
 
-    /**
-     * Consulta leve para cálculo de ofensiva/streak: lê EXCLUSIVAMENTE os registros
-     * de ExerciseSessionRecord em 1 única chamada, sem disparar centenas de agregações.
-     */
     suspend fun queryExerciseSessionTimes(startTime: Instant, endTime: Instant, component: String = "StreakEngine"): List<Instant> {
         val client = healthConnectClient ?: return emptyList()
         if (!AppLifecycleTracker.isForeground) {
@@ -619,11 +888,6 @@ class HealthConnectRepository(
         return startTimes
     }
 
-    /**
-     * Consulta detalhada de exercícios para uma janela limitada (ex: 1 semana).
-     * Se uma SecurityException ocorrer (ex: app em background ou permissão negada),
-     * interrompe o laço IMEDIATAMENTE, evitando a repetição rápida de centenas de chamadas.
-     */
     suspend fun queryExerciseSessions(
         startTime: Instant,
         endTime: Instant,
@@ -639,7 +903,7 @@ class HealthConnectRepository(
         val qId = HealthConnectLogger.nextQueryId("EX_FULL")
         val coroutineCtx = currentCoroutineContext()
         val startMs = System.currentTimeMillis()
-        val allRecords = mutableListOf<ExerciseSessionRecord>()
+        val allRawRecords = mutableListOf<ExerciseSessionRecord>()
         var pageToken: String? = null
 
         HealthConnectLogger.logQueryStart(qId, "ExerciseSessionRecord", component, reason, coroutineCtx)
@@ -654,7 +918,7 @@ class HealthConnectRepository(
                         pageToken = pageToken
                     )
                 )
-                allRecords.addAll(response.records)
+                allRawRecords.addAll(response.records)
                 pageToken = response.pageToken
             } catch (ce: CancellationException) {
                 HealthConnectLogger.logQueryCancelled(qId, "ExerciseSessionRecord", component, System.currentTimeMillis() - startMs, "CancelledByLifecycle", coroutineCtx)
@@ -665,6 +929,35 @@ class HealthConnectRepository(
             }
         } while (pageToken != null)
 
+        // Deduplicação estrita de treinos:
+        // Se houver treino do Google Fit sobreposto a um do Huami (dentro de 15 minutos),
+        // descartamos a duplicata do Fit para evitar contagem dupla de treinos e calorias!
+        val huamiSessions = allRawRecords.filter { it.metadata.dataOrigin.packageName == ORIGIN_HUAMI }
+        val fitSessions = allRawRecords.filter { it.metadata.dataOrigin.packageName == ORIGIN_GOOGLE_FIT }
+        val otherSessions = allRawRecords.filter { it.metadata.dataOrigin.packageName != ORIGIN_HUAMI && it.metadata.dataOrigin.packageName != ORIGIN_GOOGLE_FIT }
+
+        val deduplicatedFitSessions = fitSessions.filter { fitSession ->
+            val hasOverlap = huamiSessions.any { huamiSession ->
+                val startDiff = Math.abs(Duration.between(fitSession.startTime, huamiSession.startTime).toMinutes())
+                val endDiff = Math.abs(Duration.between(fitSession.endTime, huamiSession.endTime).toMinutes())
+                startDiff <= 15 || endDiff <= 15
+            }
+            if (hasOverlap) {
+                HealthConnectLogger.logOriginResolution(
+                    metric = "Exercício (Deduplicação)",
+                    selectedDate = fitSession.startTime.atZone(ZoneId.systemDefault()).toLocalDate(),
+                    intervalExact = "${fitSession.startTime} a ${fitSession.endTime}",
+                    huamiCount = 1,
+                    googleFitCount = 1,
+                    chosenOrigin = "Zepp (Huami)",
+                    isFromCache = false,
+                    diagnosticNote = "Descartada duplicata do Google Fit sincronizada do relógio"
+                )
+            }
+            !hasOverlap
+        }
+
+        val allRecords = huamiSessions + deduplicatedFitSessions + otherSessions
         val resultList = mutableListOf<ExerciseSessionData>()
         var securityErrorEncountered = false
 
@@ -674,14 +967,15 @@ class HealthConnectRepository(
             var distanceKm: Double? = null
             var avgHr: Int? = null
             var maxHr: Int? = null
+            val sessionOrigin = session.metadata.dataOrigin
 
-            // Só consulta métricas adicionais se o app continuar no foreground e não tiver encontrado SecurityException
             if (!securityErrorEncountered && AppLifecycleTracker.isForeground) {
                 try {
                     val cResponse = client.aggregate(
                         AggregateRequest(
                             metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
-                            timeRangeFilter = TimeRangeFilter.between(session.startTime, session.endTime)
+                            timeRangeFilter = TimeRangeFilter.between(session.startTime, session.endTime),
+                            dataOriginFilter = setOf(sessionOrigin)
                         )
                     )
                     calories = cResponse[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories
@@ -695,7 +989,8 @@ class HealthConnectRepository(
                         val dResponse = client.aggregate(
                             AggregateRequest(
                                 metrics = setOf(DistanceRecord.DISTANCE_TOTAL),
-                                timeRangeFilter = TimeRangeFilter.between(session.startTime, session.endTime)
+                                timeRangeFilter = TimeRangeFilter.between(session.startTime, session.endTime),
+                                dataOriginFilter = setOf(sessionOrigin)
                             )
                         )
                         distanceKm = dResponse[DistanceRecord.DISTANCE_TOTAL]?.inKilometers
@@ -713,7 +1008,9 @@ class HealthConnectRepository(
                                 timeRangeFilter = TimeRangeFilter.between(session.startTime, session.endTime)
                             )
                         )
-                        val samples = hrResponse.records.flatMap { it.samples }
+                        val hrMatchingRecords = hrResponse.records.filter { it.metadata.dataOrigin == sessionOrigin }
+                            .ifEmpty { hrResponse.records }
+                        val samples = hrMatchingRecords.flatMap { it.samples }
                         if (samples.isNotEmpty()) {
                             avgHr = samples.map { it.beatsPerMinute }.average().toInt()
                             maxHr = samples.maxOf { it.beatsPerMinute }.toInt()
@@ -746,7 +1043,7 @@ class HealthConnectRepository(
                     avgHeartRateBpm = avgHr,
                     maxHeartRateBpm = maxHr,
                     intensityZone = zone,
-                    sourceApp = session.metadata.dataOrigin.packageName
+                    sourceApp = formatOriginDisplayName(session.metadata.dataOrigin.packageName)
                 )
             )
         }
@@ -779,6 +1076,7 @@ class HealthConnectRepository(
             val totalCalories = daySessions.mapNotNull { it.caloriesKcal }.sum()
             val totalDist = daySessions.mapNotNull { it.distanceKm }.sum()
             val hasActivity = daySessions.isNotEmpty()
+            val primarySource = daySessions.firstOrNull()?.sourceApp ?: "Health Connect"
 
             val intensityScore = when {
                 totalMins >= 60 -> 1.0f
@@ -797,7 +1095,8 @@ class HealthConnectRepository(
                     totalDistanceKm = totalDist,
                     exerciseSessions = daySessions,
                     hasActivity = hasActivity,
-                    intensityScore = intensityScore
+                    intensityScore = intensityScore,
+                    sourceOrigin = primarySource
                 )
             )
         }
@@ -805,15 +1104,12 @@ class HealthConnectRepository(
         return daySummaries
     }
 
-    // ------------------- OFENSIVA DE DIAS CONSECUTIVOS (ESTILO DUOLINGO) -------------------
-
     suspend fun calculateStreak(weeklyGoalDays: Int, component: String = "HomeScreen"): StreakData {
         val zone = ZoneId.systemDefault()
         val today = LocalDate.now()
         val thirtyDaysAgo = today.minusDays(30).atStartOfDay(zone).toInstant()
         val nowInstant = Instant.now()
 
-        // Otimização crucial: usa queryExerciseSessionTimes em vez de queryExerciseSessions com agregados!
         val sessionStartTimes = queryExerciseSessionTimes(thirtyDaysAgo, nowInstant, component)
         val workoutDates = sessionStartTimes.map { it.atZone(zone).toLocalDate() }.toSet()
 
@@ -846,10 +1142,10 @@ class HealthConnectRepository(
         if (currentStreak > maxStreak) maxStreak = currentStreak
 
         val message = when {
-            currentStreak >= 5 -> "Você treinou $currentStreak dias consecutivos. Imparável!"
-            currentStreak >= 3 -> "$currentStreak dias consecutivos de atividade. Fighting!"
-            activeDaysThisWeek >= weeklyGoalDays -> "Você completou $activeDaysThisWeek dias nesta semana. Meta superada!"
-            activeDaysThisWeek > 0 -> "Sua consistência está aumentando. Continue assim!"
+            currentStreak >= 5 -> "Você treinou $currentStreak dias consecutivos. Consistência exemplar!"
+            currentStreak >= 3 -> "$currentStreak dias consecutivos em movimento. Mantenha o ritmo!"
+            activeDaysThisWeek >= weeklyGoalDays -> "Meta semanal de $activeDaysThisWeek dias superada!"
+            activeDaysThisWeek > 0 -> "Ótimo início nesta semana. Continue firme!"
             else -> "Inicie sua sequência com uma atividade hoje."
         }
 
@@ -860,6 +1156,66 @@ class HealthConnectRepository(
             weeklyGoalDays = weeklyGoalDays,
             streakMessage = message,
             isGoalMet = activeDaysThisWeek >= weeklyGoalDays
+        )
+    }
+
+    // ------------------- GASTO CALÓRICO BASAL (BMR) & BALANÇO ENERGÉTICO -------------------
+
+    /**
+     * Lê a Taxa Metabólica Basal (BMR) do Health Connect (BasalMetabolicRateRecord).
+     * Se não disponível, calcula a estimativa precisa pela fórmula de Mifflin-St Jeor:
+     * - Homens: (10 × peso) + (6.25 × altura) - (5 × idade) + 5
+     * - Mulheres: (10 × peso) + (6.25 × altura) - (5 × idade) - 161
+     */
+    suspend fun readBasalMetabolicRate(userProfile: UserProfile?, component: String = "Repository"): BasalEnergyData {
+        val client = healthConnectClient
+        if (client != null && AppLifecycleTracker.isForeground) {
+            try {
+                val qId = HealthConnectLogger.nextQueryId("BMR")
+                val startTime = Instant.now().minus(30, ChronoUnit.DAYS)
+                val response = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = BasalMetabolicRateRecord::class,
+                        timeRangeFilter = TimeRangeFilter.between(startTime, Instant.now())
+                    )
+                )
+
+                // Prioriza Zepp / Huami se houver
+                val huamiRecord = response.records.filter { it.metadata.dataOrigin.packageName == ORIGIN_HUAMI }.lastOrNull()
+                val chosenRecord = huamiRecord ?: response.records.lastOrNull()
+
+                if (chosenRecord != null) {
+                    val kcalPerDay = chosenRecord.basalMetabolicRate.inKilocaloriesPerDay
+                    val origin = formatOriginDisplayName(chosenRecord.metadata.dataOrigin.packageName)
+
+                    HealthConnectLogger.logOriginResolution(
+                        metric = "Gasto Basal (BMR)",
+                        selectedDate = LocalDate.now(),
+                        intervalExact = "${chosenRecord.time}",
+                        huamiCount = if (huamiRecord != null) 1 else 0,
+                        googleFitCount = if (chosenRecord.metadata.dataOrigin.packageName == ORIGIN_GOOGLE_FIT) 1 else 0,
+                        chosenOrigin = origin,
+                        isFromCache = false,
+                        diagnosticNote = "Registro real de BMR lido: ${kcalPerDay.toInt()} kcal/dia"
+                    )
+
+                    return BasalEnergyData(
+                        bmrKcal = kcalPerDay,
+                        sourceOrigin = origin,
+                        isEstimated = false,
+                        measurementDate = chosenRecord.time
+                    )
+                }
+            } catch (_: Exception) {}
+        }
+
+        // Estimativa Mifflin-St Jeor baseada no perfil
+        val estimated = userProfile?.estimatedBmrMifflinStJeor ?: 1650.0
+        return BasalEnergyData(
+            bmrKcal = estimated,
+            sourceOrigin = "Estimativa (Mifflin-St Jeor)",
+            isEstimated = true,
+            measurementDate = null
         )
     }
 
@@ -905,13 +1261,16 @@ class HealthConnectRepository(
         return Pair(weight, fat)
     }
 
-    // ------------------- SINCRONIZAÇÃO COMPLETA COM CACHE E MUTEX -------------------
+    // ------------------- SINCRONIZAÇÃO COMPLETA COM CACHE E PRIORIDADES -------------------
 
-    suspend fun fetchAllLiveHealthData(forceRefresh: Boolean = false, component: String = "MainActivity"): LiveHealthData {
+    suspend fun fetchAllLiveHealthData(
+        forceRefresh: Boolean = false,
+        userProfile: UserProfile? = null,
+        component: String = "MainActivity"
+    ): LiveHealthData {
         val now = System.currentTimeMillis()
         val cached = cachedLiveData
 
-        // Retorna cache em memória se a consulta anterior ocorreu há menos de 3 minutos
         if (!forceRefresh && cached != null && (now - lastLiveDataFetchTime) < 180_000L) {
             HealthConnectLogger.logQuerySuccess("CACHE", "LiveHealthData", component, 0, 1)
             return cached
@@ -923,22 +1282,27 @@ class HealthConnectRepository(
         }
 
         return syncMutex.withLock {
-            // Re-verifica cache sob o lock
             if (!forceRefresh && cachedLiveData != null && (System.currentTimeMillis() - lastLiveDataFetchTime) < 180_000L) {
                 return@withLock cachedLiveData!!
             }
 
-            val steps = readTodaySteps(component)
-            val activeCalories = readTodayActiveCalories(component).toInt()
-            val latestHeartRate = readLatestHeartRate(component)
-            val restingHeartRate = readLatestRestingHeartRate(component)
             val today = LocalDate.now()
-            val sleepSession = readSleepSessionForNight(today, component)
+            val (steps, stepsOrigin) = readTodaySteps(component)
+            val (activeCaloriesDouble, caloriesOrigin) = readTodayActiveCalories(component)
+            val activeCalories = activeCaloriesDouble.toInt()
+            val (latestHeartRate, hrOrigin) = readLatestHeartRateWithOrigin(component)
+            val (restingHeartRate, rhrOrigin) = readLatestRestingHeartRateWithOrigin(component)
+            val (sleepSession, sleepOrigin) = readSleepSessionForNightWithOrigin(today, component)
+            val (distanceKm, distanceOrigin) = readDailyDistanceKmWithOrigin(today, component)
+
+            // Gasto Basal (BMR) e Gasto Energético Total
+            val bmrData = readBasalMetabolicRate(userProfile, component)
+            val totalEnergy = bmrData.bmrKcal + activeCaloriesDouble
+
             val zone = ZoneId.systemDefault()
             val weekStart = today.minusDays(7).atStartOfDay(zone).toInstant()
             val exercises = queryExerciseSessions(weekStart, Instant.now(), component, "LIVE_FETCH_RECENT_EXERCISES")
             val (weight, bodyFat) = readLatestWeightAndBodyFat(component)
-            val distanceKm = readDailyDistanceKm(today, component)
 
             val formatter = DateTimeFormatter.ofPattern("HH:mm")
             val sleepDuration = sleepSession?.totalDurationMinutes ?: 0L
@@ -949,9 +1313,13 @@ class HealthConnectRepository(
 
             val result = LiveHealthData(
                 steps = steps,
+                stepsOrigin = stepsOrigin,
                 activeCaloriesKcal = activeCalories,
+                activeCaloriesOrigin = caloriesOrigin,
                 heartRateBpm = latestHeartRate,
+                heartRateOrigin = hrOrigin,
                 restingHeartRateBpm = restingHeartRate,
+                restingHeartRateOrigin = rhrOrigin,
                 sleepDurationMinutes = sleepDuration,
                 sleepStartTime = sleepStartStr,
                 sleepEndTime = sleepEndStr,
@@ -959,11 +1327,18 @@ class HealthConnectRepository(
                 sleepStageLight = sleepSession?.lightMinutes ?: 0L,
                 sleepStageRem = sleepSession?.remMinutes ?: 0L,
                 sleepStageAwake = sleepSession?.awakeMinutes ?: 0L,
+                sleepOrigin = sleepOrigin,
                 weeklyExerciseDays = exercises.map { it.startTime.atZone(zone).toLocalDate() }.toSet().size,
                 weeklyExerciseMinutes = exercises.sumOf { it.durationMinutes },
                 weightKg = weight,
                 bodyFatPct = bodyFat,
                 distanceKm = distanceKm,
+                distanceOrigin = distanceOrigin,
+                bmrKcal = bmrData.bmrKcal,
+                bmrOrigin = bmrData.sourceOrigin,
+                isBmrEstimated = bmrData.isEstimated,
+                bmrMeasurementDate = bmrData.measurementDate,
+                totalEnergyKcal = totalEnergy,
                 lastSyncTimestamp = System.currentTimeMillis(),
                 isRealHealthConnectData = hasRealData,
                 sourcePackage = if (hasRealData) "Health Connect Live" else "Aguardando Leitura"
@@ -995,9 +1370,13 @@ class HealthConnectRepository(
 
 data class LiveHealthData(
     val steps: Long = 0L,
+    val stepsOrigin: String = "Health Connect",
     val activeCaloriesKcal: Int = 0,
+    val activeCaloriesOrigin: String = "Health Connect",
     val heartRateBpm: Int? = null,
+    val heartRateOrigin: String = "Health Connect",
     val restingHeartRateBpm: Int? = null,
+    val restingHeartRateOrigin: String = "Health Connect",
     val sleepDurationMinutes: Long = 0L,
     val sleepStartTime: String = "--:--",
     val sleepEndTime: String = "--:--",
@@ -1005,11 +1384,18 @@ data class LiveHealthData(
     val sleepStageLight: Long = 0L,
     val sleepStageRem: Long = 0L,
     val sleepStageAwake: Long = 0L,
+    val sleepOrigin: String = "Health Connect",
     val weeklyExerciseDays: Int = 0,
     val weeklyExerciseMinutes: Long = 0L,
     val weightKg: Double? = null,
     val bodyFatPct: Double? = null,
     val distanceKm: Double = 0.0,
+    val distanceOrigin: String = "Health Connect",
+    val bmrKcal: Double? = null,
+    val bmrOrigin: String = "Estimativa (Mifflin-St Jeor)",
+    val isBmrEstimated: Boolean = true,
+    val bmrMeasurementDate: Instant? = null,
+    val totalEnergyKcal: Double = 0.0,
     val lastSyncTimestamp: Long = 0L,
     val isRealHealthConnectData: Boolean = false,
     val sourcePackage: String = "Health Connect"
