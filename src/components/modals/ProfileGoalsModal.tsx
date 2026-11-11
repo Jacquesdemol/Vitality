@@ -155,19 +155,96 @@ export const ProfileGoalsModal: React.FC<ProfileGoalsModalProps> = ({
                 </div>
               </div>
 
-              {/* Live BMI preview */}
-              <div className="p-3.5 rounded-2xl bg-[#121214] border border-white/5 flex items-center justify-between text-xs">
-                <div>
-                  <span className="text-[#85858C] block text-[11px]">Índice de Massa Corporal (IMC)</span>
+              {/* Live BMI and BMR preview */}
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="p-3 rounded-2xl bg-[#121214] border border-white/5">
+                  <span className="text-[#85858C] block text-[10px]">IMC</span>
                   <span className="text-white font-bold text-sm">{bmiCalc.bmi}</span>
+                  <span className="text-[#85858C] text-[10px] block mt-0.5">{bmiCalc.classification}</span>
                 </div>
-                <span className="px-2.5 py-1 rounded-full bg-[#242428] text-white text-xs font-medium">
-                  {bmiCalc.classification}
-                </span>
+                <div className="p-3 rounded-2xl bg-[#121214] border border-white/5">
+                  <span className="text-[#85858C] block text-[10px]">Gasto Basal (BMR)</span>
+                  <span className="text-white font-bold text-sm">
+                    ~{Math.round(
+                      (10 * formData.weightKg) + (6.25 * formData.heightCm) - (5 * formData.age) + (formData.gender === 'female' ? -161 : 5)
+                    )} kcal
+                  </span>
+                  <span className="text-[#85858C] text-[10px] block mt-0.5">Mifflin-St Jeor</span>
+                </div>
               </div>
             </>
           ) : (
             <>
+              {/* Modalidade da Meta Calórica */}
+              <div>
+                <label className="text-xs text-[#85858C] block mb-1">Modalidade da Meta Calórica</label>
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFormData({
+                        ...formData,
+                        goals: { ...formData.goals, calorieGoalMode: 'active' },
+                      })
+                    }
+                    className={`p-2.5 rounded-xl border text-left transition-all ${
+                      (formData.goals.calorieGoalMode || 'active') === 'active'
+                        ? 'border-white bg-[#242428] text-white'
+                        : 'border-white/5 bg-[#121214] text-[#85858C]'
+                    }`}
+                  >
+                    <div className="text-xs font-semibold">Calorias Ativas</div>
+                    <div className="text-[10px] opacity-70 mt-0.5">Treinos e caminhada</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFormData({
+                        ...formData,
+                        goals: { ...formData.goals, calorieGoalMode: 'total' },
+                      })
+                    }
+                    className={`p-2.5 rounded-xl border text-left transition-all ${
+                      formData.goals.calorieGoalMode === 'total'
+                        ? 'border-white bg-[#242428] text-white'
+                        : 'border-white/5 bg-[#121214] text-[#85858C]'
+                    }`}
+                  >
+                    <div className="text-xs font-semibold">Gasto Total Diário</div>
+                    <div className="text-[10px] opacity-70 mt-0.5">Basal + Ativas</div>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-[#85858C] block mb-1">
+                  {formData.goals.calorieGoalMode === 'total'
+                    ? 'Meta de Gasto Energético Total (kcal/dia)'
+                    : 'Meta de Calorias Ativas (kcal/dia)'}
+                </label>
+                <input
+                  type="number"
+                  step="50"
+                  value={formData.goals.activeCalories}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      goals: { ...formData.goals, activeCalories: Number(e.target.value) },
+                    })
+                  }
+                  className="w-full px-3.5 py-2.5 rounded-2xl bg-[#242428] border border-white/5 text-white text-xs focus:outline-none focus:border-white/20"
+                  min="100"
+                  max="10000"
+                  required
+                />
+                <p className="text-[10px] text-[#85858C] mt-1 leading-snug">
+                  {formData.goals.calorieGoalMode === 'total'
+                    ? 'Gasto Total = Taxa Metabólica Basal (repouso) + Calorias gastas em atividades.'
+                    : 'Apenas a energia adicional gasta em exercícios físicos e caminhadas.'}
+                </p>
+              </div>
+
               <div>
                 <label className="text-xs text-[#85858C] block mb-1">Meta de Passos Diários</label>
                 <input
@@ -183,25 +260,6 @@ export const ProfileGoalsModal: React.FC<ProfileGoalsModalProps> = ({
                   className="w-full px-3.5 py-2.5 rounded-2xl bg-[#242428] border border-white/5 text-white text-xs focus:outline-none focus:border-white/20"
                   min="1000"
                   max="50000"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-[#85858C] block mb-1">Calorias Ativas Diárias (kcal)</label>
-                <input
-                  type="number"
-                  step="50"
-                  value={formData.goals.activeCalories}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      goals: { ...formData.goals, activeCalories: Number(e.target.value) },
-                    })
-                  }
-                  className="w-full px-3.5 py-2.5 rounded-2xl bg-[#242428] border border-white/5 text-white text-xs focus:outline-none focus:border-white/20"
-                  min="100"
-                  max="5000"
                   required
                 />
               </div>

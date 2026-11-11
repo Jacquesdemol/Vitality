@@ -48,11 +48,28 @@ export const INITIAL_USER_PROFILE: UserProfile = {
   goals: {
     dailySteps: 10000,
     activeCalories: 650,
+    calorieGoalMode: 'active',
     sleepMinutes: 480, // 8h
     weeklyWorkouts: 5,
     targetWeightKg: 72.0,
   },
 };
+
+/**
+ * Cálculo da Taxa Metabólica Basal (BMR) pela fórmula científica de Mifflin-St Jeor:
+ * Homens: (10 × peso) + (6.25 × altura) - (5 × idade) + 5
+ * Mulheres: (10 × peso) + (6.25 × altura) - (5 × idade) - 161
+ */
+export function calculateBmrMifflinStJeor(profile: UserProfile): number {
+  const { weightKg, heightCm, age, gender } = profile;
+  if (!weightKg || !heightCm || !age) return 1650;
+  if (gender === 'male') {
+    return Math.round(10 * weightKg + 6.25 * heightCm - 5 * age + 5);
+  } else if (gender === 'female') {
+    return Math.round(10 * weightKg + 6.25 * heightCm - 5 * age - 161);
+  }
+  return Math.round(10 * weightKg + 6.25 * heightCm - 5 * age - 78);
+}
 
 export const INITIAL_HEART_RATE: HeartRateData = {
   latestBpm: 72,

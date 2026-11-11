@@ -10,11 +10,10 @@ import {
   SlidersHorizontal,
   MoreVertical,
 } from 'lucide-react';
-import { UserProfile, ZeppConnectorState } from '../../types/vital.ts';
+import { UserProfile } from '../../types/vital.ts';
 
 interface SettingsScreenProps {
   user: UserProfile;
-  zeppState: ZeppConnectorState;
   isDemoMode: boolean;
   onOpenProfile: () => void;
   onOpenGoals: () => void;
@@ -28,7 +27,6 @@ interface SettingsScreenProps {
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   user,
-  zeppState,
   isDemoMode,
   onOpenProfile,
   onOpenGoals,
@@ -120,7 +118,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <div>
               <span className="text-sm font-semibold text-[#F2F2F4] block">Dispositivos conectados</span>
               <span className="text-xs text-[#85858C]">
-                Pulseira, relógio e sensores {zeppState.deviceName ? `(${zeppState.deviceName.split(' ')[0]})` : ''}
+                Health Connect (Zepp Huami prioritário &amp; Google Fit)
               </span>
             </div>
           </div>

@@ -18,7 +18,6 @@ interface OptionsMenuModalProps {
   onToggleDemoMode: () => void;
   onOpenCustomizeWidgets: () => void;
   onOpenHealthConnect: () => void;
-  onOpenZepp: () => void;
   onOpenGoals: () => void;
 }
 
@@ -29,7 +28,6 @@ export const OptionsMenuModal: React.FC<OptionsMenuModalProps> = ({
   onToggleDemoMode,
   onOpenCustomizeWidgets,
   onOpenHealthConnect,
-  onOpenZepp,
   onOpenGoals,
 }) => {
   if (!isOpen) return null;
@@ -94,18 +92,6 @@ export const OptionsMenuModal: React.FC<OptionsMenuModalProps> = ({
         >
           <Activity className="w-4 h-4 text-[#85858C]" />
           <span>Android Health Connect</span>
-        </button>
-
-        {/* Zepp Connector */}
-        <button
-          onClick={() => {
-            onClose();
-            onOpenZepp();
-          }}
-          className="w-full px-3 py-2.5 rounded-2xl flex items-center gap-2.5 text-xs text-left text-white hover:bg-[#242428] transition-colors"
-        >
-          <Watch className="w-4 h-4 text-[#85858C]" />
-          <span>Zepp Open Platform</span>
         </button>
 
         {/* Metas */}

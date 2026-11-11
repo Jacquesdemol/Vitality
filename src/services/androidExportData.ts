@@ -601,45 +601,6 @@ class DailyInsightEngine {
 `,
     },
     {
-      path: 'app/src/main/java/com/vital/health/zepp/ZeppConnector.kt',
-      category: 'kotlin',
-      description: 'Official Zepp Open Platform integration architecture',
-      content: `package com.vital.health.zepp
-
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-
-sealed class ZeppConnectionStatus {
-    object Disconnected : ZeppConnectionStatus()
-    object AwaitingConfig : ZeppConnectionStatus()
-    object SyncedViaHealthConnect : ZeppConnectionStatus()
-    data class Connected(val tokenExpiry: Long, val deviceName: String) : ZeppConnectionStatus()
-}
-
-/**
- * ZeppConnector - Interface modular para Zepp Open Platform (Amazfit).
- * Observação de segurança: Conforme especificação, client secrets e troca
- * de token OAuth 2.0 são delegados a um backend seguro.
- */
-class ZeppConnector {
-
-    private val _status = MutableStateFlow<ZeppConnectionStatus>(
-        ZeppConnectionStatus.SyncedViaHealthConnect
-    )
-    val status: StateFlow<ZeppConnectionStatus> = _status
-
-    fun connectViaZeppHealthConnect() {
-        _status.value = ZeppConnectionStatus.SyncedViaHealthConnect
-    }
-
-    fun initiateOAuth(authCode: String) {
-        // Envia authCode para backend seguro
-        // Backend valida na Zepp Open Platform e retorna token de sessão
-    }
-}
-`,
-    },
-    {
       path: 'README.md',
       category: 'docs',
       description: 'Instructions to open and compile in Android Studio',
@@ -648,10 +609,9 @@ class ZeppConnector {
 Projeto nativo completo em **Kotlin** com **Jetpack Compose**, **Material 3**, **Health Connect SDK**, **Room** e **WorkManager**.
 
 ## 📱 Estrutura do Projeto
-- **ui/screens**: Telas Início, Sono, Exercícios e Configurações fiéis ao design monocromático (#090909, #171719, #242428).
+- **ui/screens**: Telas Início, Sono, Exercícios e Configurações fiéis ao design monocromático e paletas selecionáveis.
 - **ui/components**: Ilha de navegação inferior flutuante inspirada na Galaxy Store, cartões de batimentos cardíacos, hipnograma de sono e composição corporal.
-- **healthconnect**: Camada de repositório com suporte a 14 tipos de registros do Health Connect (StepsRecord, SleepSessionRecord, etc).
-- **zepp**: Módulo preparado para a plataforma oficial Zepp Open Platform (Amazfit).
+- **healthconnect**: Camada de repositório robusta com suporte a múltiplos registros do Health Connect (StepsRecord, SleepSessionRecord, BasalMetabolicRateRecord, etc), priorizando registros Zepp/Huami (com.huami.watch.hmwatchmanager) e fallback Google Fit sem duplicidade de soma.
 - **insights**: DailyInsightEngine com recomendações não-diagnósticas baseadas no histórico individual.
 
 ## 🚀 Como Compilar no Android Studio

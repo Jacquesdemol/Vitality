@@ -8,7 +8,6 @@ import {
   TabType,
   UserProfile,
   WidgetConfig,
-  ZeppConnectorState,
   WorkoutSession,
   HeartRateData,
   StepsData,
@@ -40,7 +39,6 @@ import { SettingsScreen } from './components/screens/SettingsScreen.tsx';
 // Modals
 import { AndroidProjectModal } from './components/modals/AndroidProjectModal.tsx';
 import { HealthConnectModal } from './components/modals/HealthConnectModal.tsx';
-import { ZeppModal } from './components/modals/ZeppModal.tsx';
 import { CustomizeWidgetsModal } from './components/modals/CustomizeWidgetsModal.tsx';
 import { ProfileGoalsModal } from './components/modals/ProfileGoalsModal.tsx';
 import { HeartRateDetailModal } from './components/modals/HeartRateDetailModal.tsx';
@@ -64,9 +62,6 @@ export default function App() {
   const [isDemoMode, setIsDemoMode] = useState<boolean>(() =>
     HealthConnectRepository.isDemoMode()
   );
-  const [zeppState, setZeppState] = useState<ZeppConnectorState>(() =>
-    HealthConnectRepository.getZeppState()
-  );
 
   // Metrics Data
   const [heartRate, setHeartRate] = useState<HeartRateData>(INITIAL_HEART_RATE);
@@ -82,7 +77,6 @@ export default function App() {
   // Modals Visibility
   const [isAndroidModalOpen, setIsAndroidModalOpen] = useState(false);
   const [isHealthConnectModalOpen, setIsHealthConnectModalOpen] = useState(false);
-  const [isZeppModalOpen, setIsZeppModalOpen] = useState(false);
   const [isCustomizeWidgetsOpen, setIsCustomizeWidgetsOpen] = useState(false);
   const [profileGoalsTab, setProfileGoalsTab] = useState<'profile' | 'goals'>('profile');
   const [isProfileGoalsOpen, setIsProfileGoalsOpen] = useState(false);
@@ -116,7 +110,6 @@ export default function App() {
     setUserProfile(INITIAL_USER_PROFILE);
     setWidgets(HealthConnectRepository.getWidgetsConfig());
     setIsDemoMode(true);
-    setZeppState(HealthConnectRepository.getZeppState());
   };
 
   return (
@@ -205,7 +198,6 @@ export default function App() {
           {currentTab === 'settings' && (
             <SettingsScreen
               user={userProfile}
-              zeppState={zeppState}
               isDemoMode={isDemoMode}
               onOpenProfile={() => {
                 setProfileGoalsTab('profile');
@@ -215,7 +207,7 @@ export default function App() {
                 setProfileGoalsTab('goals');
                 setIsProfileGoalsOpen(true);
               }}
-              onOpenDevices={() => setIsZeppModalOpen(true)}
+              onOpenDevices={() => setIsHealthConnectModalOpen(true)}
               onOpenPrivacy={() => setIsPrivacyOpen(true)}
               onOpenAbout={() => setIsAboutOpen(true)}
               onOpenCustomizeWidgets={() => setIsCustomizeWidgetsOpen(true)}
@@ -238,13 +230,6 @@ export default function App() {
       <HealthConnectModal
         isOpen={isHealthConnectModalOpen}
         onClose={() => setIsHealthConnectModalOpen(false)}
-      />
-
-      <ZeppModal
-        isOpen={isZeppModalOpen}
-        onClose={() => setIsZeppModalOpen(false)}
-        zeppState={zeppState}
-        onUpdateState={(st) => setZeppState(st)}
       />
 
       <CustomizeWidgetsModal
@@ -291,7 +276,6 @@ export default function App() {
         onToggleDemoMode={handleToggleDemoMode}
         onOpenCustomizeWidgets={() => setIsCustomizeWidgetsOpen(true)}
         onOpenHealthConnect={() => setIsHealthConnectModalOpen(true)}
-        onOpenZepp={() => setIsZeppModalOpen(true)}
         onOpenGoals={() => {
           setProfileGoalsTab('goals');
           setIsProfileGoalsOpen(true);

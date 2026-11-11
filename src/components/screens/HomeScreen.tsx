@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Heart,
   Flame,
@@ -9,6 +9,9 @@ import {
   ChevronRight,
   SlidersHorizontal,
   Sparkles,
+  Zap,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react';
 import {
   UserProfile,
@@ -60,7 +63,31 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onOpenHealthConnect,
   onOpenOptionsMenu,
 }) => {
+  const [isWeeklyEnergyView, setIsWeeklyEnergyView] = useState(false);
   const firstName = user.name.split(' ')[0] || 'Iury';
+
+  // Cálculo BMR (Mifflin-St Jeor)
+  const bmrKcal = Math.round(
+    10 * user.weightKg + 6.25 * user.heightCm - 5 * user.age + (user.gender === 'female' ? -161 : 5)
+  );
+  const activeKcal = calories.activeKcal;
+  const totalEnergyKcal = bmrKcal + activeKcal;
+  const isTotalMode = user.goals.calorieGoalMode === 'total';
+  const dailyGoalKcal = user.goals.activeCalories || 650;
+
+  const currentBurn = isTotalMode ? totalEnergyKcal : activeKcal;
+  const remainingKcal = Math.max(0, dailyGoalKcal - currentBurn);
+  const diffKcal = currentBurn - dailyGoalKcal;
+  const dailyFatEquivalenceGrams = Math.round((diffKcal / 7.7) * 10) / 10;
+
+  // Semanal
+  const weeklyActiveKcal = calories.weeklyHistory.reduce((acc, d) => acc + d.activeKcal, 0);
+  const weeklyBasalKcal = bmrKcal * 7;
+  const weeklyTotalKcal = weeklyBasalKcal + weeklyActiveKcal;
+  const weeklyGoalKcal = dailyGoalKcal * 7;
+  const weeklyCurrentBurn = isTotalMode ? weeklyTotalKcal : weeklyActiveKcal;
+  const weeklyDiffKcal = weeklyCurrentBurn - weeklyGoalKcal;
+  const weeklyFatEquivalenceGrams = Math.round((weeklyDiffKcal / 7.7) * 10) / 10;
 
   // Highlight insight for the banner
   const topInsight = insights[0];
@@ -137,7 +164,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         Batimentos
                       </span>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-[#85858C] group-hover:text-white transition-colors" />
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-[#85858C] bg-[#242428] px-2 py-0.5 rounded-full font-medium">
+                        Zepp (Huami)
+                      </span>
+                      <ChevronRight className="w-4 h-4 text-[#85858C] group-hover:text-white transition-colors" />
+                    </div>
                   </div>
 
                   <div className="flex items-end justify-between mt-2">
@@ -164,16 +196,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
             case 'calories':
             case 'steps':
-              // We render calories and steps together in a 2-column row if both exist
               if (widget.id === 'calories') {
                 return (
                   <div key="row_calories_steps" className="grid grid-cols-2 gap-3.5">
                     {/* Calories Card */}
                     <div className="rounded-3xl bg-[#171719] border border-white/5 p-4 flex flex-col justify-between hover:border-white/10 transition-all">
                       <div>
-                        <div className="flex items-center gap-1.5 text-[#85858C] text-xs mb-2">
-                          <Flame className="w-3.5 h-3.5 text-white/90" />
-                          <span className="text-[#85858C] font-medium text-xs">Calorias</span>
+                        <div className="flex items-center justify-between text-[#85858C] text-xs mb-2">
+                          <div className="flex items-center gap-1.5">
+                            <Flame className="w-3.5 h-3.5 text-white/90" />
+                            <span className="text-[#85858C] font-medium text-xs">Calorias</span>
+                          </div>
+                          <span className="text-[9px] text-[#85858C] bg-[#242428] px-1.5 py-0.5 rounded-full font-medium">
+                            Zepp
+                          </span>
                         </div>
                         <div className="flex items-baseline gap-1">
                           <span className="text-2xl font-bold text-[#F2F2F4]">
@@ -183,7 +219,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         </div>
                       </div>
 
-                      {/* Mini bar graph representation */}
                       <div className="flex items-end gap-1 h-9 mt-3">
                         {calories.hourlyDistribution.map((h, i) => (
                           <div
@@ -203,9 +238,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                     <div className="rounded-3xl bg-[#171719] border border-white/5 p-4 flex flex-col justify-between hover:border-white/10 transition-all">
                       <div className="flex items-start justify-between">
                         <div>
-                          <div className="flex items-center gap-1.5 text-[#85858C] text-xs mb-2">
-                            <Footprints className="w-3.5 h-3.5 text-white/90" />
-                            <span className="text-[#85858C] font-medium text-xs">Passos</span>
+                          <div className="flex items-center justify-between text-[#85858C] text-xs mb-2">
+                            <div className="flex items-center gap-1.5">
+                              <Footprints className="w-3.5 h-3.5 text-white/90" />
+                              <span className="text-[#85858C] font-medium text-xs">Passos</span>
+                            </div>
+                            <span className="text-[9px] text-[#85858C] bg-[#242428] px-1.5 py-0.5 rounded-full font-medium">
+                              Zepp
+                            </span>
                           </div>
                           <div className="text-2xl font-bold text-[#F2F2F4]">
                             {steps.current.toLocaleString('pt-BR')}
@@ -219,6 +259,128 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                           <StepsRing current={steps.current} goal={steps.goal} size={54} strokeWidth={4} />
                         </div>
                       </div>
+                    </div>
+
+                    {/* Widget Balanço Energético & Queima Calórica */}
+                    <div className="col-span-2 rounded-3xl bg-[#171719] border border-white/5 p-4.5 sm:p-5 flex flex-col gap-3.5 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white">
+                            <Zap className="w-4 h-4 text-white" />
+                          </div>
+                          <div>
+                            <span className="text-sm font-bold text-[#F2F2F4] block tracking-tight">
+                              Balanço Energético
+                            </span>
+                            <span className="text-[11px] text-[#85858C]">
+                              {isTotalMode ? 'Meta: Gasto Total Diário' : 'Meta: Calorias Ativas'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Toggle Hoje / Semana */}
+                        <div className="flex rounded-xl bg-[#242428] p-0.5 border border-white/5 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => setIsWeeklyEnergyView(false)}
+                            className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
+                              !isWeeklyEnergyView ? 'bg-[#171719] text-white shadow-xs' : 'text-[#85858C] hover:text-white'
+                            }`}
+                          >
+                            Hoje
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsWeeklyEnergyView(true)}
+                            className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
+                              isWeeklyEnergyView ? 'bg-[#171719] text-white shadow-xs' : 'text-[#85858C] hover:text-white'
+                            }`}
+                          >
+                            Semana
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 3 blocos de métricas */}
+                      <div className="grid grid-cols-3 gap-2 pt-1 border-t border-white/5">
+                        <div>
+                          <span className="text-[10px] text-[#85858C] block uppercase font-medium">Basal (BMR)</span>
+                          <span className="text-base font-bold text-[#F2F2F4] block mt-0.5">
+                            {!isWeeklyEnergyView ? bmrKcal : weeklyBasalKcal}
+                          </span>
+                          <span className="text-[9px] text-[#85858C] block">Mifflin-St Jeor</span>
+                        </div>
+
+                        <div className="text-center">
+                          <span className="text-[10px] text-[#85858C] block uppercase font-medium">Ativas</span>
+                          <span className="text-base font-bold text-white block mt-0.5">
+                            {!isWeeklyEnergyView ? activeKcal : weeklyActiveKcal}
+                          </span>
+                          <span className="text-[9px] text-[#85858C] block">Zepp (Huami)</span>
+                        </div>
+
+                        <div className="text-right">
+                          <span className="text-[10px] text-[#85858C] block uppercase font-medium">Gasto Total</span>
+                          <span className="text-base font-bold text-[#F2F2F4] block mt-0.5">
+                            {!isWeeklyEnergyView ? totalEnergyKcal : weeklyTotalKcal} <span className="text-[10px] font-normal text-[#85858C]">kcal</span>
+                          </span>
+                          <span className="text-[9px] text-[#85858C] block">Basal + Ativas</span>
+                        </div>
+                      </div>
+
+                      {/* Barra de progresso para a meta */}
+                      <div className="flex flex-col gap-1.5 pt-1">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-[#85858C]">
+                            {(!isWeeklyEnergyView ? currentBurn : weeklyCurrentBurn) >= (!isWeeklyEnergyView ? dailyGoalKcal : weeklyGoalKcal)
+                              ? 'Meta de queima cumprida!'
+                              : `Faltam ${Math.round((!isWeeklyEnergyView ? dailyGoalKcal : weeklyGoalKcal) - (!isWeeklyEnergyView ? currentBurn : weeklyCurrentBurn))} kcal`}
+                          </span>
+                          <span className="text-[#F2F2F4] font-semibold">
+                            Meta: {!isWeeklyEnergyView ? dailyGoalKcal : weeklyGoalKcal} kcal
+                          </span>
+                        </div>
+                        <div className="w-full h-2 rounded-full bg-[#242428] overflow-hidden">
+                          <div
+                            className="h-full bg-white rounded-full transition-all"
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                Math.max(
+                                  5,
+                                  ((!isWeeklyEnergyView ? currentBurn : weeklyCurrentBurn) /
+                                    Math.max(1, !isWeeklyEnergyView ? dailyGoalKcal : weeklyGoalKcal)) *
+                                    100
+                                )
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Equivalência em gordura corporal */}
+                      {(() => {
+                        const fatGrams = !isWeeklyEnergyView ? dailyFatEquivalenceGrams : weeklyFatEquivalenceGrams;
+                        const isSurplus = fatGrams >= 0;
+                        const absGrams = Math.abs(fatGrams);
+                        return (
+                          <div className="rounded-2xl bg-[#242428]/60 p-3 flex flex-col gap-1 text-[11px] border border-white/5">
+                            <div className="flex items-center gap-1.5 font-semibold text-[#F2F2F4]">
+                              {isSurplus ? (
+                                <TrendingUp className="w-3.5 h-3.5 text-white" />
+                              ) : (
+                                <TrendingDown className="w-3.5 h-3.5 text-amber-400" />
+                              )}
+                              <span>
+                                {isSurplus ? 'Superávit' : 'Déficit'} energético equivalente a ~{absGrams}g de gordura
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-[#85858C] leading-snug">
+                              Aproximação matemática baseada em 7.700 kcal por kg de tecido adiposo. Não é uma previsão de alteração direta de peso na balança.
+                            </p>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 );
